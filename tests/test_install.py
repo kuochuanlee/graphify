@@ -12,6 +12,7 @@ PLATFORMS = {
     "droid": (".factory/skills/graphify/SKILL.md",),
     "trae": (".trae/skills/graphify/SKILL.md",),
     "trae-cn": (".trae-cn/skills/graphify/SKILL.md",),
+    "gemini": (".gemini/skills/graphify/SKILL.md",),
     "windows": (".claude/skills/graphify/SKILL.md",),
 }
 
@@ -70,31 +71,39 @@ def test_install_unknown_platform_exits(tmp_path):
 def test_codex_skill_contains_spawn_agent():
     """Codex skill file must reference spawn_agent."""
     import graphify
-    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text(encoding="utf-8")
     assert "spawn_agent" in skill
 
 
 def test_opencode_skill_contains_mention():
     """OpenCode skill file must reference @mention."""
     import graphify
-    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text(encoding="utf-8")
     assert "@mention" in skill
 
 
 def test_claw_skill_is_sequential():
     """OpenClaw skill file must describe sequential extraction."""
     import graphify
-    skill = (Path(graphify.__file__).parent / "skill-claw.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-claw.md").read_text(encoding="utf-8")
     assert "sequential" in skill.lower()
     assert "spawn_agent" not in skill
     assert "@mention" not in skill
+
+
+def test_gemini_skill_contains_parallel_shell():
+    """Gemini skill file must reference subagent parallel shell dispatch."""
+    import graphify
+    skill = (Path(graphify.__file__).parent / "skill-gemini.md").read_text(encoding="utf-8")
+    assert "gemini --yolo" in skill
+    assert "background shell jobs" in skill
 
 
 def test_all_skill_files_exist_in_package():
     """All installable platform skill files must be present in the installed package."""
     import graphify
     pkg = Path(graphify.__file__).parent
-    for name in ("skill.md", "skill-codex.md", "skill-opencode.md", "skill-claw.md", "skill-windows.md", "skill-droid.md", "skill-trae.md"):
+    for name in ("skill.md", "skill-codex.md", "skill-opencode.md", "skill-claw.md", "skill-windows.md", "skill-droid.md", "skill-trae.md", "skill-gemini.md"):
         assert (pkg / name).exists(), f"Missing: {name}"
 
 
@@ -225,3 +234,42 @@ def test_opencode_agents_uninstall_removes_plugin(tmp_path):
     if config_file.exists():
         config = _json.loads(config_file.read_text())
         assert not any("graphify.js" in p for p in config.get("plugin", []))
+
+
+def test_install_gemini(tmp_path):
+    _install(tmp_path, "gemini")
+    assert (tmp_path / ".gemini" / "skills" / "graphify" / "SKILL.md").exists()
+
+
+def test_gemini_install_creates_gemini_md(tmp_path):
+    from graphify.__main__ import gemini_install
+    gemini_install(tmp_path)
+    assert (tmp_path / "GEMINI.md").exists()
+    content = (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
+    assert "<!-- graphify -->" in content
+
+
+def test_gemini_install_idempotent(tmp_path):
+    from graphify.__main__ import gemini_install
+    gemini_install(tmp_path)
+    gemini_install(tmp_path)
+    content = (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
+    assert content.count("<!-- graphify -->") == 1
+
+
+def test_gemini_uninstall_removes_section(tmp_path):
+    from graphify.__main__ import gemini_install, gemini_uninstall
+    gemini_install(tmp_path)
+    gemini_uninstall(tmp_path)
+    content = (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
+    assert "<!-- graphify -->" not in content
+
+
+def test_gemini_install_appends_to_existing_gemini_md(tmp_path):
+    from graphify.__main__ import gemini_install
+    existing = tmp_path / "GEMINI.md"
+    existing.write_text("# My Project\n\nSome existing content.\n", encoding="utf-8")
+    gemini_install(tmp_path)
+    content = existing.read_text(encoding="utf-8")
+    assert "# My Project" in content
+    assert "<!-- graphify -->" in content
