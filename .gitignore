@@ -22,3 +22,5 @@ docs/superpowers/
 .vscode/
 openspec/
 uv.lock
+GEMINI.md
+.gemini/

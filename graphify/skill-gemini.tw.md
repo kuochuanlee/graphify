@@ -73,15 +73,29 @@ if [ -n "$GRAPHIFY_BIN" ]; then
 else
     PYTHON="python3"
 fi
-"$PYTHON" -c "import graphify" 2>/dev/null || "$PYTHON" -m pip install graphifyy -q 2>/dev/null || "$PYTHON" -m pip install graphifyy -q --break-system-packages 2>&1 | tail -3
+
+# Verify graphify is importable — never auto-install
+if ! "$PYTHON" -c "import graphify" 2>/dev/null; then
+    echo "ERROR: graphify not found in the active Python environment." >&2
+    echo "Please activate your project venv and install manually:" >&2
+    echo "  uv pip install -e ." >&2
+    echo "  # or: uv add graphifyy" >&2
+    exit 1
+fi
+
 mkdir -p graphify-out
 "$PYTHON" -c "import sys; open('graphify-out/.graphify_python', 'w').write(sys.executable)"
 ```
 
 **PowerShell (Windows):**
 ```powershell
-python -c "import graphify" 2>$null
-if ($LASTEXITCODE -ne 0) { pip install graphifyy -q 2>&1 | Select-Object -Last 3 }
+$importCheck = python -c "import graphify" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "ERROR: graphify not found in the active Python environment."
+    Write-Error "Please activate your project venv and install manually:"
+    Write-Error "  uv pip install -e ."
+    exit 1
+}
 New-Item -ItemType Directory -Force -Path graphify-out | Out-Null
 python -c "import sys; open('graphify-out/.graphify_python', 'w').write(sys.executable)"
 ```

@@ -249,27 +249,27 @@ def _is_noise_dir(part: str) -> bool:
     return False
 
 
-def _load_graphifyignore(root: Path) -> list[str]:
-    """Read .graphifyignore from root and return a list of patterns.
+def _load_ignore_patterns(root: Path) -> list[str]:
+    """Read .gitignore and .graphifyignore from root and return a merged list of patterns.
 
     Lines starting with # are comments. Blank lines are ignored.
     Patterns follow gitignore semantics: glob matched against the path
     relative to root. A leading slash anchors to root. A trailing slash
     matches directories only (we match both dir and file for simplicity).
     """
-    ignore_file = root / ".graphifyignore"
-    if not ignore_file.exists():
-        return []
     patterns = []
-    for line in ignore_file.read_text(errors="ignore").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            patterns.append(line)
+    for filename in (".gitignore", ".graphifyignore"):
+        ignore_file = root / filename
+        if ignore_file.exists():
+            for line in ignore_file.read_text(errors="ignore").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    patterns.append(line)
     return patterns
 
 
 def _is_ignored(path: Path, root: Path, patterns: list[str]) -> bool:
-    """Return True if path matches any .graphifyignore pattern."""
+    """Return True if path matches any .gitignore/.graphifyignore pattern."""
     if not patterns:
         return False
     try:
@@ -309,7 +309,7 @@ def detect(root: Path, *, follow_symlinks: bool = False) -> dict:
     total_words = 0
 
     skipped_sensitive: list[str] = []
-    ignore_patterns = _load_graphifyignore(root)
+    ignore_patterns = _load_ignore_patterns(root)
 
     # Always include graphify-out/memory/ - query results filed back into the graph
     memory_dir = root / "graphify-out" / "memory"
