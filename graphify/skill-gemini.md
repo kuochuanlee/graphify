@@ -106,13 +106,13 @@ Add `--deep` if the original invocation used `--mode deep`. Read `total_chunks` 
 
 If `total_chunks` is 0, skip to Part C.
 
-For each chunk from 1 to `total_chunks`, construct the command below (replace `i` with the actual number). Run ALL chunks in a parallel bash block.
+For each chunk from 1 to `total_chunks`, construct the following PowerShell command (replace `i` with the chunk number). Run ALL chunks concurrently in the background.
 
-```bash
-gemini --yolo -p "$(cat graphify-out/.graphify_prompt_i.txt)" > graphify-out/.graphify_chunk_i.json &
-# ... repeat for i=2, i=3 ...
-wait
+```powershell
+Get-Content graphify-out\.graphify_prompt_i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\.graphify_chunk_i.json -Encoding utf8
 ```
+
+Wait for all background executions to complete before proceeding.
 
 **B3 - Merge results:**
 

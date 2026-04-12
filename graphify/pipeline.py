@@ -426,7 +426,8 @@ def cmd_merge_semantic() -> None:
     print(
         f"Extraction complete - {len(deduped)} nodes, "
         f"{len(merged_edges)} edges "
-        f"({len(cached['nodes'])} from cache, {len(all_nodes)} new)"
+        f"({len(cached['nodes'])} from semantic cache, "
+        f"{len(all_nodes)} newly extracted)"
     )
 
     # 清理所有暫存檔案

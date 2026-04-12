@@ -106,13 +106,13 @@ python -m graphify pipeline prepare-semantic [--deep]
 
 如果 `total_chunks` 為 0，跳到 Part C。
 
-針對 1 到 `total_chunks` 的每個 chunk，建構下方指令（將 `i` 替換為實際數字）。在平行的 bash 區塊中執行所有 chunk。
+針對 1 到 `total_chunks` 的每個 chunk，建構下方的 PowerShell 指令（將 `i` 替換為實際數字）。將所有 chunk 的指令丟到背景平行執行。
 
-```bash
-gemini --yolo -p "$(cat graphify-out/.graphify_prompt_i.txt)" > graphify-out/.graphify_chunk_i.json &
-# ... repeat for i=2, i=3 ...
-wait
+```powershell
+Get-Content graphify-out\.graphify_prompt_i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\.graphify_chunk_i.json -Encoding utf8
 ```
+
+等待所有的背景執行完畢後，再進入下個步驟。
 
 **B3 - 合併結果：**
 
