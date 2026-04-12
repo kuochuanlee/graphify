@@ -7,7 +7,12 @@ import networkx as nx
 
 
 def _safe_filename(name: str) -> str:
-    return name.replace("/", "-").replace(" ", "_").replace(":", "-")
+    # Remove control characters and common illegal filename chars on Windows
+    import re
+    clean = re.sub(r"[\0-\31\\/*?:\"<>|#^[\]]", " ", name).strip()
+    # Replace spaces with underscores and cap length
+    clean = re.sub(r"\s+", "_", clean)[:100].strip("_")
+    return clean or "unnamed"
 
 
 def _cross_community_links(G: nx.Graph, nodes: list[str], own_cid: int, labels: dict[int, str]) -> list[tuple[str, int]]:

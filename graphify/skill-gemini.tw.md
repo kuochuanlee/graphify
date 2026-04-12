@@ -113,6 +113,7 @@ Get-Content graphify-out\.graphify_prompt_i.txt -Raw | gemini --yolo | Out-File 
 ```
 
 等待所有的背景執行完畢後，再進入下個步驟。
+If a chunk fails with 429 (Too Many Requests), wait 30 seconds and retry once before reporting failure.
 
 **B3 - 合併結果：**
 
