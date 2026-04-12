@@ -355,7 +355,7 @@ def cmd_merge_semantic() -> None:
 
     for cf in chunk_files:
         try:
-            data = json.loads(Path(cf).read_text(encoding="utf-8"))
+            data = json.loads(Path(cf).read_text(encoding="utf-8-sig"))
             if "nodes" in data and "edges" in data:
                 all_nodes.extend(data["nodes"])
                 all_edges.extend(data["edges"])
@@ -851,7 +851,10 @@ def cmd_finalize(args: list[str]) -> None:
         encoding="utf-8",
     )
 
-    print(f"This run: {input_tok:,} input tokens, {output_tok:,} output tokens")
+    if input_tok == 0 and output_tok == 0:
+        print("This run: N/A (tokens not recorded by Gemini CLI)")
+    else:
+        print(f"This run: {input_tok:,} input tokens, {output_tok:,} output tokens")
     print(
         f"All time: {cost['total_input_tokens']:,} input, "
         f"{cost['total_output_tokens']:,} output "

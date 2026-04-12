@@ -49,7 +49,7 @@ Three things it does that an LLM alone cannot:
 
 If no path was given, use `.` (current directory). Do not ask the user for a path.
 
-Follow these steps in order. Do not skip steps.
+Follow these steps in order. Do not skip steps. **Important:** Run each command separately. Do NOT use `&&` to combine commands (PowerShell 5 does not support it).
 
 ### Step 1 - Ensure graphify is installed
 
