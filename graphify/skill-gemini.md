@@ -82,7 +82,7 @@ This step has two parallel tracks: **AST extraction** (deterministic, free) and 
 python -m graphify pipeline ast-extract
 ```
 
-#### Part B - Semantic extraction (parallel subagents)
+#### Part B - Semantic extraction
 
 **Fast path:** If the detect output showed `code_only: true`, skip Part B entirely and go to Part C.
 
@@ -94,50 +94,15 @@ python -m graphify pipeline cache-check
 
 If `skip_semantic` is true in the output, go to Part C.
 
-**B1 - Prepare chunks and prompts:**
+**B1 - Dispatch, extract, merge:**
 
 ```
-python -m graphify pipeline prepare-semantic [--deep]
+python -m graphify pipeline dispatch-semantic [--deep]
 ```
 
-Add `--deep` if the original invocation used `--mode deep`. Print the `estimate_message` from the output. Read `total_chunks`.
+Add `--deep` if the original invocation used `--mode deep`.
 
-**B2 - Dispatch parallel extraction:**
-
-If `total_chunks` is 0, skip to Part C.
-
-Replace TOTAL_CHUNKS below with the actual number from B1.
-
-**PowerShell (Windows):**
-```powershell
-$n = TOTAL_CHUNKS
-$jobs = 1..$n | ForEach-Object {
-    $i = $_
-    Start-Job -ScriptBlock {
-        $prompt = Get-Content "graphify-out/.graphify_prompt_$using:i.txt" -Raw
-        gemini --yolo -p $prompt | Out-File "graphify-out/.graphify_chunk_$using:i.json" -Encoding utf8
-    }
-}
-$jobs | Wait-Job | Receive-Job
-Remove-Job -Job $jobs
-```
-
-**Bash (Linux/macOS):**
-```bash
-for i in $(seq 1 TOTAL_CHUNKS); do
-  gemini --yolo -p "$(cat graphify-out/.graphify_prompt_$i.txt)" \
-    > graphify-out/.graphify_chunk_$i.json 2>&1 &
-done
-wait
-```
-
-**B3 - Merge results:**
-
-```
-python -m graphify pipeline merge-semantic
-```
-
-If it reports >50% chunk failure, stop and tell the user.
+This command handles everything: prepares prompts, dispatches parallel gemini subprocesses, retries failed chunks, caches results, and merges. If the output `status` is `"fatal"`, stop and tell the user. Otherwise print node/edge counts and continue.
 
 #### Part C - Merge AST + semantic
 

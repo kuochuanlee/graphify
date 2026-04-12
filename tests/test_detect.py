@@ -1,5 +1,5 @@
 from pathlib import Path
-from graphify.detect import classify_file, count_words, detect, FileType, _looks_like_paper, _is_ignored, _load_graphifyignore
+from graphify.detect import classify_file, count_words, detect, FileType, _looks_like_paper, _is_ignored, _load_ignore_patterns
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

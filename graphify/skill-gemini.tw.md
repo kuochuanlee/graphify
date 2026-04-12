@@ -82,7 +82,7 @@ python -m graphify pipeline detect INPUT_PATH
 python -m graphify pipeline ast-extract
 ```
 
-#### Part B - 語意提取（平行子代理人）
+#### Part B - 語意提取
 
 **快速通關：** 如果偵測結果顯示 `code_only: true`，跳過整個 Part B 直接進入 Part C。
 
@@ -94,50 +94,15 @@ python -m graphify pipeline cache-check
 
 如果輸出中 `skip_semantic` 為 true，直接進入 Part C。
 
-**B1 - 準備 chunk 及 prompt 檔案：**
+**B1 - 分派、提取、合併：**
 
 ```
-python -m graphify pipeline prepare-semantic [--deep]
+python -m graphify pipeline dispatch-semantic [--deep]
 ```
 
-如果原始呼叫使用了 `--mode deep` 就加上 `--deep`。印出輸出中的 `estimate_message`。讀取 `total_chunks`。
+如果原始呼叫使用了 `--mode deep` 就加上 `--deep`。
 
-**B2 - 派發平行提取：**
-
-如果 `total_chunks` 為 0，跳到 Part C。
-
-將下方的 TOTAL_CHUNKS 替換為 B1 輸出的實際數字。
-
-**PowerShell (Windows):**
-```powershell
-$n = TOTAL_CHUNKS
-$jobs = 1..$n | ForEach-Object {
-    $i = $_
-    Start-Job -ScriptBlock {
-        $prompt = Get-Content "graphify-out/.graphify_prompt_$using:i.txt" -Raw
-        gemini --yolo -p $prompt | Out-File "graphify-out/.graphify_chunk_$using:i.json" -Encoding utf8
-    }
-}
-$jobs | Wait-Job | Receive-Job
-Remove-Job -Job $jobs
-```
-
-**Bash (Linux/macOS):**
-```bash
-for i in $(seq 1 TOTAL_CHUNKS); do
-  gemini --yolo -p "$(cat graphify-out/.graphify_prompt_$i.txt)" \
-    > graphify-out/.graphify_chunk_$i.json 2>&1 &
-done
-wait
-```
-
-**B3 - 合併結果：**
-
-```
-python -m graphify pipeline merge-semantic
-```
-
-如果回報超過 50% 的 chunk 失敗，停止並告知使用者。
+此指令處理所有工作：準備 prompt、平行分派 gemini 子程序、重試失敗的 chunk、快取結果、合併。如果輸出的 `status` 是 `"fatal"`，停止並告知使用者。否則印出節點/邊數並繼續。
 
 #### Part C - 合併 AST + 語意結果
 
