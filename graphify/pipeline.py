@@ -14,7 +14,6 @@ from __future__ import annotations
 import glob
 import json
 import shutil
-import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -242,6 +241,9 @@ def cmd_prepare_semantic(args: list[str]) -> None:
     """Step B1: 將未快取檔案切分 chunk 並產生 prompt 檔案。"""
     deep = "--deep" in args
 
+    # 清除前次殘留的 chunk 和 prompt 暫存檔案，避免污染後續 merge
+    _clean_stale_dispatch_files()
+
     # 讀取未快取檔案清單
     uncached_path = OUT_DIR / ".graphify_uncached.txt"
     if not uncached_path.exists():
@@ -366,12 +368,21 @@ def cmd_merge_semantic() -> None:
             print(f"Warning: {cf} invalid ({e}), skipping")
             fail_count += 1
 
-    # 超過半數 chunk 失敗則中止
+    # 先寫入快取再判定成敗（確保斷點續建可用）
+    # 即使整體失敗，已成功的 chunk 仍會被快取，下次 cache-check 可識別
+    if all_nodes or all_edges:
+        saved = save_semantic_cache(all_nodes, all_edges, all_hyperedges)
+        print(f"Cached {saved} files")
+
+    # 超過半數 chunk 失敗則中止（快取已寫入，下次重跑可續建）
     total = success_count + fail_count
     if total > 0 and fail_count > total / 2:
         print(
-            f"ERROR: {fail_count}/{total} chunks failed (>50%). Aborting.",
+            f"FATAL: {fail_count}/{total} chunks failed (>50%). Aborting.",
             file=sys.stderr,
+        )
+        print(
+            f"FATAL: {fail_count}/{total} chunks failed (>50%). Aborting."
         )
         sys.exit(1)
 
@@ -382,10 +393,6 @@ def cmd_merge_semantic() -> None:
         "hyperedges": all_hyperedges,
     }
     _save_json(".graphify_semantic_new.json", new_data)
-
-    # 寫入快取
-    saved = save_semantic_cache(all_nodes, all_edges, all_hyperedges)
-    print(f"Cached {saved} files")
 
     # 合併快取 + 新結果
     cached = (
@@ -432,368 +439,18 @@ def cmd_merge_semantic() -> None:
         if p.exists():
             p.unlink()
 
-    for cf in chunk_files:
-        Path(cf).unlink(missing_ok=True)
-
-    for pf in OUT_DIR.glob(".graphify_prompt_*.txt"):
-        pf.unlink(missing_ok=True)
+    _clean_stale_dispatch_files()
 
 
 def _clean_stale_dispatch_files() -> None:
     """清除前次執行殘留的 chunk 和 prompt 暫存檔案。
 
     避免殘留檔案污染後續執行的 merge 結果。
+    由 prepare-semantic 和 merge-semantic 呼叫。
     """
     for pattern in [".graphify_chunk_*.json", ".graphify_prompt_*.txt"]:
         for f in OUT_DIR.glob(pattern):
             f.unlink(missing_ok=True)
-
-
-def _run_gemini_chunk(
-    chunk_index: int,
-    prompt_path: Path,
-    output_path: Path,
-) -> subprocess.CompletedProcess:
-    """用 subprocess 呼叫 gemini CLI 處理單一 chunk。
-
-    Args:
-        chunk_index: chunk 序號（用於日誌）
-        prompt_path: prompt 檔案的絕對路徑
-        output_path: 輸出 JSON 的絕對路徑
-
-    Returns:
-        subprocess.CompletedProcess 結果
-    """
-    prompt_text = prompt_path.read_text(encoding="utf-8")
-
-    result = subprocess.run(
-        ["gemini", "--yolo", "-p", prompt_text],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-
-    # 將 stdout 寫入輸出檔案
-    if result.returncode == 0 and result.stdout.strip():
-        output_path.write_text(result.stdout, encoding="utf-8")
-
-    return result
-
-
-def _validate_chunk_json(chunk_path: Path) -> dict | None:
-    """驗證 chunk JSON 是否包含必要的 nodes 和 edges 欄位。
-
-    Returns:
-        解析後的 dict，或驗證失敗時回傳 None
-    """
-    if not chunk_path.exists():
-        return None
-
-    try:
-        data = json.loads(chunk_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-
-    if "nodes" not in data or "edges" not in data:
-        return None
-
-    return data
-
-
-def cmd_dispatch_semantic(args: list[str]) -> None:
-    """Step B1-B3 整合：準備 prompt、平行分派 gemini、retry、合併、快取。
-
-    取代 skill 中的 OS-specific shell block（PowerShell/Bash），
-    用 Python subprocess 統一處理，避免 CWD 繼承、路徑編碼等問題。
-    """
-    deep = "--deep" in args
-
-    # === Step 0: 清除前次殘留的暫存檔案 ===
-    _clean_stale_dispatch_files()
-
-    # === Step 1: 檢查 gemini CLI 是否可用 ===
-    if not shutil.which("gemini"):
-        print(
-            "FATAL: gemini CLI not found in PATH. "
-            "Please install Gemini CLI first.",
-            file=sys.stderr,
-        )
-        _print_json({
-            "status": "fatal",
-            "message": "gemini CLI not found in PATH",
-        })
-        sys.exit(1)
-
-    # === Step 2: 準備 chunk 和 prompt（原 prepare-semantic 邏輯） ===
-    uncached_path = OUT_DIR / ".graphify_uncached.txt"
-    if not uncached_path.exists():
-        _print_json({
-            "status": "ok",
-            "total_chunks": 0,
-            "message": "No uncached files to process",
-        })
-        return
-
-    uncached = [
-        f
-        for f in uncached_path.read_text(encoding="utf-8").strip().split("\n")
-        if f
-    ]
-    if not uncached:
-        _print_json({
-            "status": "ok",
-            "total_chunks": 0,
-            "message": "No uncached files to process",
-        })
-        return
-
-    # 載入 prompt template
-    template_path = (
-        Path(__file__).parent / "templates" / "semantic_extraction.txt"
-    )
-    template_text = template_path.read_text(encoding="utf-8")
-    tmpl = Template(template_text)
-
-    # 分組邏輯：圖片獨立一組，其餘以目錄為單位分組
-    images = [
-        f for f in uncached
-        if Path(f).suffix.lower() in _IMAGE_EXTS
-    ]
-    non_images = [
-        f for f in uncached
-        if Path(f).suffix.lower() not in _IMAGE_EXTS
-    ]
-
-    # 依目錄分組（同目錄的檔案放在一起可提高跨檔關聯擷取率）
-    by_dir: dict[str, list[str]] = defaultdict(list)
-    for f in non_images:
-        by_dir[str(Path(f).parent)].append(f)
-
-    # 建構 chunks，每組上限 25 個檔案
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    for dir_path in sorted(by_dir.keys()):
-        dir_files = by_dir[dir_path]
-        if len(current) + len(dir_files) > 25:
-            if current:
-                chunks.append(current)
-            # 單一目錄超過 25 個檔案就拆分
-            while len(dir_files) > 25:
-                chunks.append(dir_files[:25])
-                dir_files = dir_files[25:]
-            current = list(dir_files)
-        else:
-            current.extend(dir_files)
-    if current:
-        chunks.append(current)
-
-    # 每張圖片獨立一組
-    for img in images:
-        chunks.append([img])
-
-    total = len(chunks)
-    if total == 0:
-        _print_json({
-            "status": "ok",
-            "total_chunks": 0,
-            "message": "No chunks to process",
-        })
-        return
-
-    # Deep mode 額外指令
-    deep_section = ""
-    if deep:
-        deep_section = (
-            "DEEP_MODE is ON: be aggressive with INFERRED edges - "
-            "indirect deps, shared assumptions, latent couplings. "
-            "Mark uncertain ones AMBIGUOUS instead of omitting."
-        )
-
-    # 產生 prompt 檔案（使用絕對路徑）
-    abs_out = OUT_DIR.resolve()
-    prompt_paths: list[Path] = []
-    output_paths: list[Path] = []
-    for i, chunk in enumerate(chunks, 1):
-        prompt = tmpl.safe_substitute(
-            FILE_LIST="\n".join(chunk),
-            CHUNK_NUM=str(i),
-            TOTAL_CHUNKS=str(total),
-            DEEP_MODE_SECTION=deep_section,
-        )
-        p = abs_out / f".graphify_prompt_{i}.txt"
-        p.write_text(prompt, encoding="utf-8")
-        prompt_paths.append(p)
-        output_paths.append(abs_out / f".graphify_chunk_{i}.json")
-
-    # 預估耗時
-    est_time = 45 * ((total + 4) // 5)
-    print(
-        f"Semantic extraction: ~{len(uncached)} files -> "
-        f"{total} chunks, estimated ~{est_time}s"
-    )
-
-    # === Step 3: 平行分派（含 retry） ===
-    max_retries = 2
-    total_retry_count = 0
-
-    # 追蹤每個 chunk 的成功狀態
-    chunk_success: list[bool] = [False] * total
-
-    for attempt in range(1 + max_retries):
-        # 找出需要（重新）處理的 chunk 索引
-        pending = [
-            idx for idx in range(total)
-            if not chunk_success[idx]
-        ]
-
-        if not pending:
-            break
-
-        if attempt > 0:
-            total_retry_count += len(pending)
-            print(
-                f"Retry {attempt}/{max_retries}: "
-                f"re-processing {len(pending)} failed chunks"
-            )
-
-        # 平行啟動所有 pending chunk 的 subprocess
-        procs: list[tuple[int, subprocess.Popen]] = []
-        for idx in pending:
-            prompt_text = prompt_paths[idx].read_text(encoding="utf-8")
-            proc = subprocess.Popen(
-                ["gemini", "--yolo", "-p", prompt_text],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            procs.append((idx, proc))
-
-        # 等待所有 subprocess 完成
-        for idx, proc in procs:
-            try:
-                stdout, stderr = proc.communicate(timeout=300)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-                print(f"Warning: chunk {idx + 1} timed out")
-                continue
-
-            # 將 stdout 寫入輸出檔案
-            if proc.returncode == 0 and stdout.strip():
-                output_paths[idx].write_text(stdout, encoding="utf-8")
-
-            # 驗證輸出是否為有效 JSON
-            data = _validate_chunk_json(output_paths[idx])
-            if data is not None:
-                chunk_success[idx] = True
-            else:
-                # 清除無效的輸出檔案，準備下一輪 retry
-                if output_paths[idx].exists():
-                    output_paths[idx].unlink()
-
-    # === Step 4: 將成功的 chunk 寫入快取（無論整體成敗） ===
-    from graphify.cache import save_semantic_cache
-
-    all_nodes: list[dict] = []
-    all_edges: list[dict] = []
-    all_hyperedges: list[dict] = []
-    success_count = 0
-    fail_count = 0
-
-    for idx in range(total):
-        data = _validate_chunk_json(output_paths[idx])
-        if data is not None:
-            all_nodes.extend(data["nodes"])
-            all_edges.extend(data["edges"])
-            all_hyperedges.extend(data.get("hyperedges", []))
-            success_count += 1
-        else:
-            fail_count += 1
-
-    # 先寫入快取再判定成敗（確保斷點續建可用）
-    if all_nodes or all_edges:
-        saved = save_semantic_cache(all_nodes, all_edges, all_hyperedges)
-        print(f"Cached {saved} files")
-
-    # === Step 5: 合併 cached + new 結果（原 merge-semantic 邏輯） ===
-    cached = (
-        _load_json(".graphify_cached.json")
-        if (OUT_DIR / ".graphify_cached.json").exists()
-        else {"nodes": [], "edges": [], "hyperedges": []}
-    )
-
-    merged_nodes = cached["nodes"] + all_nodes
-    merged_edges = cached["edges"] + all_edges
-    merged_hyperedges = (
-        cached.get("hyperedges", []) + all_hyperedges
-    )
-
-    # 依 id 去除重複節點
-    seen: set[str] = set()
-    deduped = []
-    for n in merged_nodes:
-        if n["id"] not in seen:
-            seen.add(n["id"])
-            deduped.append(n)
-
-    _save_json(".graphify_semantic.json", {
-        "nodes": deduped,
-        "edges": merged_edges,
-        "hyperedges": merged_hyperedges,
-        "input_tokens": 0,
-        "output_tokens": 0,
-    })
-
-    print(
-        f"Extraction complete - {len(deduped)} nodes, "
-        f"{len(merged_edges)} edges "
-        f"({len(cached['nodes'])} from cache, {len(all_nodes)} new)"
-    )
-
-    # === Step 6: 判定成敗 ===
-    if total > 0 and fail_count > total / 2:
-        # 失敗超過 50%：保留快取但中止管線
-        # 注意：不清理暫存檔，讓下次 cache-check 可以找到已快取的結果
-        print(
-            f"FATAL: {fail_count}/{total} chunks failed (>50%) "
-            f"after {max_retries} retries. Aborting.",
-            file=sys.stderr,
-        )
-        _print_json({
-            "status": "fatal",
-            "message": (
-                f"{fail_count}/{total} chunks failed (>50%) "
-                f"after {max_retries} retries"
-            ),
-            "total_chunks": total,
-            "success_count": success_count,
-            "fail_count": fail_count,
-        })
-        sys.exit(1)
-
-    # === Step 7: 成功，清理暫存檔案 ===
-    for name in [
-        ".graphify_cached.json",
-        ".graphify_uncached.txt",
-        ".graphify_semantic_new.json",
-    ]:
-        p = OUT_DIR / name
-        if p.exists():
-            p.unlink()
-
-    _clean_stale_dispatch_files()
-
-    # 輸出結構化 JSON 供 LLM 讀取
-    _print_json({
-        "status": "ok",
-        "total_chunks": total,
-        "success_count": success_count,
-        "fail_count": fail_count,
-        "retry_count": total_retry_count,
-        "cached_files": saved if (all_nodes or all_edges) else 0,
-        "nodes": len(deduped),
-        "edges": len(merged_edges),
-    })
 
 
 def cmd_merge_all() -> None:
@@ -917,22 +574,45 @@ def cmd_build(args: list[str]) -> None:
 
 
 def cmd_label(args: list[str]) -> None:
-    """Step 5: 套用社群標籤並重新產生報告。"""
-    if len(args) < 1:
-        print("error: missing labels JSON argument", file=sys.stderr)
-        sys.exit(1)
+    """Step 5: 套用社群標籤並重新產生報告。
 
-    labels_json = args[0]
+    支援兩種輸入方式：
+    - 直接傳 JSON 字串：pipeline label '{"0": "Name"}'
+    - 從檔案讀取：pipeline label --from-file labels.json
+    """
+    labels_json = None
+    labels_file = None
     input_path = "."
 
-    # 解析 --path 參數
-    i = 1
+    # 解析參數
+    i = 0
     while i < len(args):
-        if args[i] == "--path" and i + 1 < len(args):
+        if args[i] == "--from-file" and i + 1 < len(args):
+            labels_file = args[i + 1]
+            i += 2
+        elif args[i] == "--path" and i + 1 < len(args):
             input_path = args[i + 1]
             i += 2
+        elif labels_json is None and not args[i].startswith("--"):
+            labels_json = args[i]
+            i += 1
         else:
             i += 1
+
+    # 從檔案讀取 JSON（優先於命令列引數，避免 shell 引號問題）
+    if labels_file:
+        try:
+            labels_json = Path(labels_file).read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"error: cannot read labels file: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    if not labels_json:
+        print(
+            "error: missing labels. Use JSON string or --from-file",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     try:
         labels = {int(k): v for k, v in json.loads(labels_json).items()}
@@ -1569,7 +1249,7 @@ def main(args: list[str]) -> None:
         "cache-check": lambda: cmd_cache_check(),
         "prepare-semantic": lambda: cmd_prepare_semantic(sub_args),
         "merge-semantic": lambda: cmd_merge_semantic(),
-        "dispatch-semantic": lambda: cmd_dispatch_semantic(sub_args),
+
         "merge-all": lambda: cmd_merge_all(),
         "build": lambda: cmd_build(sub_args),
         "label": lambda: cmd_label(sub_args),

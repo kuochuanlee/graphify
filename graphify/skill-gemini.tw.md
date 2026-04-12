@@ -94,15 +94,33 @@ python -m graphify pipeline cache-check
 
 如果輸出中 `skip_semantic` 為 true，直接進入 Part C。
 
-**B1 - 分派、提取、合併：**
+**B1 - 準備 chunk 及 prompt 檔案：**
 
 ```
-python -m graphify pipeline dispatch-semantic [--deep]
+python -m graphify pipeline prepare-semantic [--deep]
 ```
 
-如果原始呼叫使用了 `--mode deep` 就加上 `--deep`。
+如果原始呼叫使用了 `--mode deep` 就加上 `--deep`。讀取 JSON 輸出中的 `total_chunks`。
 
-此指令處理所有工作：準備 prompt、平行分派 gemini 子程序、重試失敗的 chunk、快取結果、合併。如果輸出的 `status` 是 `"fatal"`，停止並告知使用者。否則印出節點/邊數並繼續。
+**B2 - 派發：**
+
+如果 `total_chunks` 為 0，跳到 Part C。
+
+針對 1 到 `total_chunks` 的每個 chunk，建構下方指令（將 `i` 替換為實際數字）。在平行的 bash 區塊中執行所有 chunk。
+
+```bash
+gemini --yolo -p "$(cat graphify-out/.graphify_prompt_i.txt)" > graphify-out/.graphify_chunk_i.json &
+# ... repeat for i=2, i=3 ...
+wait
+```
+
+**B3 - 合併結果：**
+
+```
+python -m graphify pipeline merge-semantic
+```
+
+如果輸出狀態顯示失敗，只重新執行失敗的 chunk，然後再次執行 merge-semantic。
 
 #### Part C - 合併 AST + 語意結果
 
@@ -122,10 +140,12 @@ python -m graphify pipeline build INPUT_PATH
 
 讀取 `graphify-out/.graphify_analysis.json`。針對每個社群鍵值，查看其節點名稱並指定 2-5 個字的人類可讀名稱（例如 "Attention Mechanism"、"Training Pipeline"、"Data Loading"）。
 
+將標籤寫出至檔案 `graphify-out/labels_draft.json`
+
 然後套用標籤：
 
 ```
-python -m graphify pipeline label '{"0": "Name1", "1": "Name2", ...}' --path INPUT_PATH
+python -m graphify pipeline label --from-file graphify-out/labels_draft.json --path INPUT_PATH
 ```
 
 ### Step 6-7 - 產生輸出
@@ -157,6 +177,8 @@ python -m graphify pipeline benchmark
 ```
 python -m graphify pipeline finalize INPUT_PATH
 ```
+
+**在 finalize 執行完畢後停止。不要重試任何失敗的步驟。**
 
 然後告知使用者（除非指定了 --obsidian，否則省略 obsidian 那行）：
 

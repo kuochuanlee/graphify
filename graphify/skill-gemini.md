@@ -94,15 +94,33 @@ python -m graphify pipeline cache-check
 
 If `skip_semantic` is true in the output, go to Part C.
 
-**B1 - Dispatch, extract, merge:**
+**B1 - Prepare chunks and prompts:**
 
 ```
-python -m graphify pipeline dispatch-semantic [--deep]
+python -m graphify pipeline prepare-semantic [--deep]
 ```
 
-Add `--deep` if the original invocation used `--mode deep`.
+Add `--deep` if the original invocation used `--mode deep`. Read `total_chunks` from the JSON output.
 
-This command handles everything: prepares prompts, dispatches parallel gemini subprocesses, retries failed chunks, caches results, and merges. If the output `status` is `"fatal"`, stop and tell the user. Otherwise print node/edge counts and continue.
+**B2 - Dispatch:**
+
+If `total_chunks` is 0, skip to Part C.
+
+For each chunk from 1 to `total_chunks`, construct the command below (replace `i` with the actual number). Run ALL chunks in a parallel bash block.
+
+```bash
+gemini --yolo -p "$(cat graphify-out/.graphify_prompt_i.txt)" > graphify-out/.graphify_chunk_i.json &
+# ... repeat for i=2, i=3 ...
+wait
+```
+
+**B3 - Merge results:**
+
+```
+python -m graphify pipeline merge-semantic
+```
+
+If the output status says it failed, re-run only the failed chunks, then run merge-semantic again.
 
 #### Part C - Merge AST + semantic
 
@@ -122,10 +140,12 @@ If it exits with error (empty graph), stop and tell the user.
 
 Read `graphify-out/.graphify_analysis.json`. For each community key, look at its node labels and assign a 2-5 word human-readable name (e.g. "Attention Mechanism", "Training Pipeline", "Data Loading").
 
+Write the labels out to a file `graphify-out/labels_draft.json`
+
 Then apply the labels:
 
 ```
-python -m graphify pipeline label '{"0": "Name1", "1": "Name2", ...}' --path INPUT_PATH
+python -m graphify pipeline label --from-file graphify-out/labels_draft.json --path INPUT_PATH
 ```
 
 ### Step 6-7 - Generate outputs
@@ -157,6 +177,8 @@ Print the output if it ran. Small corpora are skipped automatically.
 ```
 python -m graphify pipeline finalize INPUT_PATH
 ```
+
+**After finalize completes, stop. Do not retry any failed steps.**
 
 Then tell the user (omit obsidian line unless --obsidian was given):
 

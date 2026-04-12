@@ -92,17 +92,16 @@ def test_claw_skill_is_sequential():
 
 
 def test_gemini_skill_contains_parallel_shell():
-    """Gemini skill file must reference dispatch-semantic for parallel extraction."""
+    """Gemini skill file must reference parallel gemini bash execution."""
     import graphify
     skill = (Path(graphify.__file__).parent / "skill-gemini.md").read_text(encoding="utf-8")
 
-    # skill 應該呼叫 dispatch-semantic（整合後的指令）
-    assert "dispatch-semantic" in skill
-
-    # gemini --yolo 已移入 pipeline.py，skill 中不應再直接出現
-    pipeline = (Path(graphify.__file__).parent / "pipeline.py").read_text(encoding="utf-8")
-    assert "gemini" in pipeline
-    assert "--yolo" in pipeline
+    # verify the bash dispatch snippet is returned
+    assert "gemini --yolo" in skill
+    assert "wait" in skill
+    
+    # check that labels is using file IO
+    assert "--from-file" in skill
 
 
 def test_all_skill_files_exist_in_package():
