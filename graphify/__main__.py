@@ -711,6 +711,9 @@ def main() -> None:
                 pass
         result = run_benchmark(graph_path, corpus_words=corpus_words)
         print_benchmark(result)
+    elif cmd == "pipeline":
+        from graphify.pipeline import main as pipeline_main
+        pipeline_main(sys.argv[2:])
     else:
         print(f"error: unknown command '{cmd}'", file=sys.stderr)
         print("Run 'graphify --help' for usage.", file=sys.stderr)
