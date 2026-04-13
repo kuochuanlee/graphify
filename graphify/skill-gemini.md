@@ -49,6 +49,12 @@ Three things it does that an LLM alone cannot:
 
 If no path was given, use `.` (current directory). Do not ask the user for a path.
 
+**Before running any steps**, check for these shortcut conditions:
+
+- If the only flag is `--mcp` AND `graphify-out/graph.json` exists: Run `python -m graphify.serve graphify-out/graph.json` and stop. Do not run the pipeline.
+
+- If the only new flags are export-related (`--wiki`, `--obsidian`, `--svg`, `--graphml`) AND `graphify-out/graph.json` exists: Run `python -m graphify pipeline export-only [flags]` and stop. Do not run the pipeline.
+
 Follow these steps in order. Do not skip steps. **Important:** Run each command separately. Do NOT use `&&` to combine commands (PowerShell 5 does not support it).
 
 ### Step 1 - Ensure graphify is installed
@@ -239,6 +245,8 @@ Then run Steps 5-9 (label, export, benchmark, finalize).
 ---
 
 ## For /graphify query
+
+If the question contains non-English terms, translate the key concepts to English before running the query. For example, "執行流程" → "pipeline execution flow", "錯誤處理" → "error handling". The graph nodes are in English so the query keywords must be English to get matches.
 
 ```
 graphify query "QUESTION" [--dfs] [--budget N]

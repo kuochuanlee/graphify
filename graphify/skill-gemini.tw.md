@@ -49,6 +49,12 @@ graphify 的核心理念源於 Andrej Karpathy 的 /raw 資料夾工作流：將
 
 如果沒有指定路徑，使用 `.` (當前目錄)。不要詢問使用者路徑。
 
+**在執行任何步驟之前**，請檢查以下快捷方式條件：
+
+- 如果唯一 flag 是 `--mcp` 且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify.serve graphify-out/graph.json` 並停止。不要執行pipeline。
+
+- 如果唯一新增的 flags 與匯出相關（`--wiki`、`--obsidian`、`--svg`、`--graphml`）且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify pipeline export-only [flags]` 並停止。不要執行pipeline。
+
 請依照以下步驟順序執行，不可跳過任何步驟。**重要提示：**請分開執行每個指令，絕對不要使用 `&&` 來串接指令 (PowerShell 5 不支援)。
 
 ### Step 1 - 確認 graphify 已安裝
@@ -239,6 +245,8 @@ python -m graphify pipeline cluster-only
 ---
 
 ## 用於 /graphify query
+
+如果問題中包含非英語術語，請在執行查詢前將關鍵概念翻譯成英文。例如，“執行流程”→“pipeline execution flow”，“錯誤處理”→“error handling”。由於圖譜節點使用英文，因此查詢關鍵字也必須是英文才能獲得匹配結果。
 
 ```
 graphify query "問題" [--dfs] [--budget N]
