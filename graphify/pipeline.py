@@ -653,8 +653,16 @@ def cmd_label(args: list[str]) -> None:
         suggested_questions=questions,
     )
     Path(OUT_DIR / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
+    # 暫存檔（供同次管線內的後續步驟使用）
     _save_json(
         ".graphify_labels.json",
+        {str(k): v for k, v in labels.items()},
+    )
+
+    # 持久化版本（不帶 .graphify_ 前綴，finalize 不會清理）
+    # 供事後獨立呼叫 export --wiki 等指令使用
+    _save_json(
+        "community_labels.json",
         {str(k): v for k, v in labels.items()},
     )
 
@@ -679,19 +687,49 @@ def cmd_export(args: list[str]) -> None:
         if a == "--obsidian-dir" and i + 1 < len(args):
             obsidian_dir = args[i + 1]
 
-    from graphify.build import build_from_json
+    # 載入圖譜：優先使用管線暫存檔（pipeline 內呼叫），
+    # 若已被 finalize 清理則 fallback 到已完成的 graph.json（獨立呼叫）
+    extract_path = OUT_DIR / ".graphify_extract.json"
+    analysis_path = OUT_DIR / ".graphify_analysis.json"
 
-    extraction = _load_json(".graphify_extract.json")
-    analysis = _load_json(".graphify_analysis.json")
-    labels_raw = (
-        _load_json(".graphify_labels.json")
-        if (OUT_DIR / ".graphify_labels.json").exists()
-        else {}
-    )
+    if extract_path.exists() and analysis_path.exists():
+        # 正常管線流程：從暫存的 extract + analysis 重建
+        from graphify.build import build_from_json
 
-    G = build_from_json(extraction)
-    communities = {int(k): v for k, v in analysis["communities"].items()}
-    cohesion = {int(k): v for k, v in analysis["cohesion"].items()}
+        extraction = _load_json(".graphify_extract.json")
+        analysis = _load_json(".graphify_analysis.json")
+
+        G = build_from_json(extraction)
+        communities = {int(k): v for k, v in analysis["communities"].items()}
+        cohesion = {int(k): v for k, v in analysis["cohesion"].items()}
+    elif (OUT_DIR / "graph.json").exists():
+        # Fallback：finalize 已清理暫存檔，從完成品 graph.json 載入
+        G = _load_graph()
+
+        # 從圖譜節點的 community 屬性重建 communities dict
+        communities: dict[int, list[str]] = {}
+        for node_id, data in G.nodes(data=True):
+            cid = data.get("community")
+            if cid is not None:
+                communities.setdefault(int(cid), []).append(node_id)
+
+        # 從圖譜重新計算 cohesion
+        from graphify.cluster import score_all
+        cohesion = score_all(G, communities)
+    else:
+        print(
+            "ERROR: No graph data found. Run /graphify first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # 社群標籤：暫存檔 > 持久檔 > 空（fallback 到數字編號）
+    if (OUT_DIR / ".graphify_labels.json").exists():
+        labels_raw = _load_json(".graphify_labels.json")
+    elif (OUT_DIR / "community_labels.json").exists():
+        labels_raw = _load_json("community_labels.json")
+    else:
+        labels_raw = {}
     labels = {int(k): v for k, v in labels_raw.items()}
 
     # HTML（預設產生，除非 --no-viz）

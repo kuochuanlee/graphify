@@ -82,7 +82,7 @@ def _subgraph_to_text(G: nx.Graph, nodes: set[str], edges: list[tuple], token_bu
     """Render subgraph as text, cutting at token_budget (approx 3 chars/token)."""
     char_budget = token_budget * 3
     lines = []
-    for nid in sorted(nodes, key=lambda n: G.degree(n), reverse=True):
+    for nid in sorted(nodes, key=lambda n: G.degree[n], reverse=True):
         d = G.nodes[nid]
         line = f"NODE {sanitize_label(d.get('label', nid))} [src={d.get('source_file', '')} loc={d.get('source_location', '')} community={d.get('community', '')}]"
         lines.append(line)
@@ -115,6 +115,13 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         from mcp import types
     except ImportError as e:
         raise ImportError("mcp not installed. Run: pip install mcp") from e
+
+    # 從 graph_path 推導出專案根目錄（graphify-out/ 的上層）
+    # 這樣 git 工具就知道要對哪個 repo 執行，read_file 也有安全邊界
+    _graph_file = Path(graph_path).resolve()
+    _project_root = _graph_file.parent.parent
+    print(f"[graphify] Serving graph: {_graph_file}", file=sys.stderr)
+    print(f"[graphify] Project root: {_project_root}", file=sys.stderr)
 
     G = _load_graph(graph_path)
     communities = _communities_from_graph(G)
@@ -210,7 +217,7 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                     "properties": {
                         "repo_path": {"type": "string", "default": ".", "description": "Optional repository path."},
                         "target": {"type": "string", "description": "Optional specific file or directory path to diff. If omitted, shows all changes."},
-                        "staged": {"type": "boolean", "default": false, "description": "If true, shows staged changes (git diff --staged)."}
+                        "staged": {"type": "boolean", "default": False, "description": "If true, shows staged changes (git diff --staged)."}
                     }
                 },
             ),
@@ -256,7 +263,7 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
             f"  Source: {d.get('source_file', '')} {d.get('source_location', '')}",
             f"  Type: {d.get('file_type', '')}",
             f"  Community: {d.get('community', '')}",
-            f"  Degree: {G.degree(nid)}",
+            f"  Degree: {G.degree[nid]}",
         ])
 
     def _tool_get_neighbors(arguments: dict) -> str:
@@ -334,16 +341,21 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         return f"Shortest path ({hops} hops):\n  " + " ".join(segments)
 
     def _tool_git_status(arguments: dict) -> str:
-        repo_path = arguments.get("repo_path", ".")
+        # 優先使用呼叫方傳入的 repo_path，否則使用從 graph_path 推導出的專案根目錄
+        repo_path = arguments.get("repo_path") or str(_project_root)
         
-        # 執行 git status，加入 --no-pager 避免卡死
+        # 執行 git status，加入 --no-pager 避免卡死；timeout 防止永久阻塞
+        # 重要：必須加上 stdin=DEVNULL，防止 git 繼承 MCP Server 的 stdio 管道
+        # （若 git 嘗試從 stdin 讀取（如認證提示），會吃掉 MCP 協議資料，導致 Claude Desktop 常轉圈圈）
         try:
             result = subprocess.run(
                 ["git", "--no-pager", "status", "-s"],
                 cwd=repo_path,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=30
             )
             
             # 檢查是否有輸出
@@ -352,15 +364,20 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                 
             return result.stdout
             
+        except subprocess.TimeoutExpired:
+            return "Git command timed out after 30 seconds."
+            
         except subprocess.CalledProcessError as e:
-            return f"Git command failed: {e.stderr}"
+            stderr = e.stderr or ""
+            return f"Git command failed (exit {e.returncode}): {stderr.strip()}"
             
         except FileNotFoundError:
-            return "Git executable not found."
+            return "Git executable not found. Ensure git is installed and in PATH."
 
 
     def _tool_git_diff(arguments: dict) -> str:
-        repo_path = arguments.get("repo_path", ".")
+        # 優先使用呼叫方傳入的 repo_path，否則使用從 graph_path 推導出的專案根目錄
+        repo_path = arguments.get("repo_path") or str(_project_root)
         target = arguments.get("target", "")
         staged = arguments.get("staged", False)
         
@@ -375,14 +392,17 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         if target:
             cmd.extend(["--", target])
             
-        # 執行 git diff
+        # 執行 git diff；timeout 防止永久阻塞
+        # 重要：必須加上 stdin=DEVNULL，防止 git 繼承 MCP Server 的 stdio 管道
         try:
             result = subprocess.run(
                 cmd,
                 cwd=repo_path,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=30
             )
             
             # 檢查是否有變更
@@ -405,11 +425,15 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                 
             return result.stdout
             
+        except subprocess.TimeoutExpired:
+            return "Git command timed out after 30 seconds."
+            
         except subprocess.CalledProcessError as e:
-            return f"Git command failed: {e.stderr}"
+            stderr = e.stderr or ""
+            return f"Git command failed (exit {e.returncode}): {stderr.strip()}"
             
         except FileNotFoundError:
-            return "Git executable not found."
+            return "Git executable not found. Ensure git is installed and in PATH."
 
 
     def _tool_read_file(arguments: dict) -> str:
@@ -423,14 +447,18 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
             
         # 讀取並處理檔案
         try:
-            path = Path(file_path).resolve()
+            # 相對路徑以 _project_root 為基礎解析，避免依賴 MCP Server 不確定的 CWD
+            # 絕對路徑直接解析（仍受後續安全邊界保護）
+            if Path(file_path).is_absolute():
+                path = Path(file_path).resolve()
+            else:
+                path = (_project_root / file_path).resolve()
             
-            # 安全邊界：只允許讀取當前工作目錄（CWD）底下的檔案，防止路徑穿越（Path Traversal）
-            cwd = Path.cwd().resolve()
+            # 安全邊界：只允許讀取專案根目錄底下的檔案，防止路徑穿越（Path Traversal）
             try:
-                path.relative_to(cwd)
+                path.relative_to(_project_root)
             except ValueError:
-                return f"Error: Access denied. '{file_path}' is outside the working directory."
+                return f"Error: Access denied. '{file_path}' is outside the project root ({_project_root})."
             
             # 確認檔案合法性
             if not path.is_file():
@@ -502,7 +530,16 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         handler = _handlers.get(name)
         if not handler:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
-        return [types.TextContent(type="text", text=handler(arguments))]
+        
+        # 包裹 top-level try-except：任何未捕捉的例外都必須以文字回傳
+        # 否則 async task 崩潰會讓 Claude Desktop 永遠看到轉圈圈而沒有回應
+        try:
+            result = handler(arguments)
+            return [types.TextContent(type="text", text=result)]
+        except Exception as exc:
+            error_msg = f"[graphify internal error] {type(exc).__name__}: {exc}"
+            print(error_msg, file=sys.stderr)
+            return [types.TextContent(type="text", text=error_msg)]
 
     import asyncio
 

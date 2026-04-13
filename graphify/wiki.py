@@ -19,6 +19,8 @@ def _cross_community_links(G: nx.Graph, nodes: list[str], own_cid: int, labels: 
     """Return (community_label, edge_count) pairs for cross-community connections, sorted descending."""
     counts: dict[str, int] = Counter()
     for nid in nodes:
+        if nid not in G:
+            continue
         for neighbor in G.neighbors(nid):
             nd = G.nodes[neighbor]
             ncid = nd.get("community")
@@ -35,18 +37,20 @@ def _community_article(
     labels: dict[int, str],
     cohesion: float | None,
 ) -> str:
-    top_nodes = sorted(nodes, key=lambda n: G.degree(n), reverse=True)[:25]
+    top_nodes = sorted(nodes, key=lambda n: G.degree[n] if n in G else 0, reverse=True)[:25]
     cross = _cross_community_links(G, nodes, cid, labels)
 
     # Edge confidence breakdown
     conf_counts: Counter = Counter()
     for nid in nodes:
+        if nid not in G:
+            continue
         for neighbor in G.neighbors(nid):
             ed = G.edges[nid, neighbor]
             conf_counts[ed.get("confidence", "EXTRACTED")] += 1
     total_edges = sum(conf_counts.values()) or 1
 
-    sources = sorted({G.nodes[n].get("source_file", "") for n in nodes} - {""})
+    sources = sorted({G.nodes[n].get("source_file", "") for n in nodes if n in G} - {""})
 
     lines: list[str] = []
     lines += [f"# {label}", ""]
@@ -58,10 +62,12 @@ def _community_article(
 
     lines += ["## Key Concepts", ""]
     for nid in top_nodes:
+        if nid not in G:
+            continue
         d = G.nodes[nid]
         node_label = d.get("label", nid)
         src = d.get("source_file", "")
-        degree = G.degree(nid)
+        degree = G.degree[nid]
         src_str = f" — `{src}`" if src else ""
         lines.append(f"- **{node_label}** ({degree} connections){src_str}")
     remaining = len(nodes) - len(top_nodes)
@@ -103,14 +109,14 @@ def _god_node_article(G: nx.Graph, nid: str, labels: dict[int, str]) -> str:
 
     lines: list[str] = []
     lines += [f"# {node_label}", ""]
-    lines += [f"> God node · {G.degree(nid)} connections · `{src}`", ""]
+    lines += [f"> God node · {G.degree[nid] if nid in G else 0} connections · `{src}`", ""]
 
     if community_name:
         lines += [f"**Community:** [[{community_name}]]", ""]
 
     # Group neighbors by relation type
     by_relation: dict[str, list[str]] = {}
-    for neighbor in sorted(G.neighbors(nid), key=lambda n: G.degree(n), reverse=True):
+    for neighbor in sorted(G.neighbors(nid), key=lambda n: G.degree[n] if n in G else 0, reverse=True):
         nd = G.nodes[neighbor]
         ed = G.edges[nid, neighbor]
         rel = ed.get("relation", "related")
@@ -200,7 +206,7 @@ def to_wiki(
     for cid, nodes in communities.items():
         label = labels.get(cid, f"Community {cid}")
         article = _community_article(G, cid, nodes, label, labels, cohesion.get(cid))
-        (out / f"{_safe_filename(label)}.md").write_text(article)
+        (out / f"{_safe_filename(label)}.md").write_text(article, encoding="utf-8")
         count += 1
 
     # God node articles
@@ -208,12 +214,13 @@ def to_wiki(
         nid = node_data.get("id")
         if nid and nid in G:
             article = _god_node_article(G, nid, labels)
-            (out / f"{_safe_filename(node_data['label'])}.md").write_text(article)
+            (out / f"{_safe_filename(node_data['label'])}.md").write_text(article, encoding="utf-8")
             count += 1
 
     # Index
     (out / "index.md").write_text(
-        _index_md(communities, labels, god_nodes_data, G.number_of_nodes(), G.number_of_edges())
+        _index_md(communities, labels, god_nodes_data, G.number_of_nodes(), G.number_of_edges()),
+        encoding="utf-8",
     )
 
     return count
