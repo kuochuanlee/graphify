@@ -105,6 +105,9 @@ def _find_node(G: nx.Graph, label: str) -> list[str]:
 
 def serve(graph_path: str = "graphify-out/graph.json") -> None:
     """Start the MCP server. Requires pip install mcp."""
+    # Allow overriding graph_path via command line argument
+    if len(sys.argv) > 1:
+        graph_path = sys.argv[1]
     try:
         from mcp.server import Server
         from mcp.server.stdio import stdio_server

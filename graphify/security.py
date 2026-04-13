@@ -153,7 +153,7 @@ def validate_graph_path(path: str | Path, base: Path | None = None) -> Path:
         FileNotFoundError - resolved path does not exist
     """
     if base is None:
-        base = Path("graphify-out").resolve()
+        base = Path(path).resolve().parent
 
     base = base.resolve()
     if not base.exists():
