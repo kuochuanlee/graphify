@@ -1,3 +1,5 @@
 # Graphify 專屬的忽略清單，用於建置知識圖譜時，排除不需要被解析的目錄或檔案
 worked/
 *.tw.md
+.gemini
+.gemini/.*

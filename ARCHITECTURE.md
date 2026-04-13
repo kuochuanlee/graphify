@@ -1,35 +1,111 @@
 # Architecture
 
-graphify is a Claude Code skill backed by a Python library. The skill orchestrates the library; the library can be used standalone.
+graphify is a three-layer architecture: **Skill** (LLM instructions) → **Pipeline** (CLI wrapper) → **Library** (core functions).
 
-## Pipeline
+- **Skill** (`skill-gemini.md` / `skill-gemini.tw.md`): Operation manual for LLMs, defines the invocation sequence
+- **Pipeline** (`pipeline.py`): CLI subcommand layer, encapsulates decision logic and temp file management
+- **Library** (`detect.py`, `extract.py`, `build.py`, ...): Pure functions, can be used standalone
+
+## Pipeline Layer (`pipeline.py`)
+
+`pipeline.py` is the glue layer between the skill and the library. Invoked via `python -m graphify pipeline <subcommand>`.
+
+Responsibilities:
+- Programmatic decision logic (replaces natural language judgments in the skill)
+- Structured JSON output for LLM consumption
+- Temp file read/write and lifecycle management under `graphify-out/`
+- OS-agnostic execution (no Bash/PowerShell branching needed)
+
+### Subcommands
+
+| Subcommand | Function | Purpose |
+|------------|----------|---------|
+| `check-install` | `cmd_check_install` | Verify graphify is importable, create output directory |
+| `detect <path>` | `cmd_detect` | Detect files, output JSON with action decision fields |
+| `ast-extract` | `cmd_ast_extract` | AST structured extraction for code files |
+| `cache-check` | `cmd_cache_check` | Check semantic extraction cache |
+| `prepare-semantic` | `cmd_prepare_semantic` | Split uncached files into chunks and generate prompt files |
+| `merge-semantic` | `cmd_merge_semantic` | Collect chunk results, validate, cache, merge |
+| `merge-all` | `cmd_merge_all` | Merge AST + semantic extraction results |
+| `build <path>` | `cmd_build` | Build graph, cluster, analyze |
+| `label <json>` | `cmd_label` | Apply community labels and regenerate report |
+| `export [flags]` | `cmd_export` | Export HTML/SVG/Obsidian/Neo4j/Wiki |
+| `benchmark` | `cmd_benchmark` | Token compression ratio benchmark |
+| `finalize [path]` | `cmd_finalize` | Save manifest, update cost tracker, cleanup temp files |
+| `update-detect <path>` | `cmd_update_detect` | Detect files changed since last run |
+| `update-merge` | `cmd_update_merge` | Merge new extraction results into existing graph |
+| `cluster-only` | `cmd_cluster_only` | Re-cluster existing graph without re-extracting |
+| `path <A> <B>` | `cmd_path` | Shortest path between two nodes |
+| `explain <node>` | `cmd_explain` | Plain-language explanation of a node |
+| `add <url>` | `cmd_add` | Fetch URL, save to corpus |
+
+## Full Pipeline Data Flow
 
 ```
-detect()  →  extract()  →  build_graph()  →  cluster()  →  analyze()  →  report()  →  export()
+detect → ast-extract ─────────────────────────────┐
+     └→ cache-check → prepare-semantic → [LLM dispatch] → merge-semantic ─┤
+                                                                          ↓
+                                                                     merge-all
+                                                                          ↓
+                                                          build → label → export → benchmark → finalize
 ```
 
-Each stage is a single function in its own module. They communicate through plain Python dicts and NetworkX graphs - no shared state, no side effects outside `graphify-out/`.
+## Incremental Update (--update) Data Flow
 
-## Module responsibilities
+```
+update-detect
+    ↓  writes .graphify_detect.json (new files only) + .graphify_incremental.json (full result)
+ast-extract / cache-check / prepare-semantic / merge-semantic / merge-all
+    ↓  extraction steps process only changed files
+update-merge
+    ↓  merges new extraction + existing graph, restores .graphify_extract.json and .graphify_detect.json to full data
+build → label → export → benchmark → finalize
+```
+
+Design pattern: **narrow scope → extract → restore scope**. `update-detect` narrows `.graphify_detect.json` to new files only, so mid-stage extraction steps naturally process only the changed subset; `update-merge` restores full data after merging, ensuring downstream steps (build/finalize) receive the correct complete dataset.
+
+## Temp Files (`graphify-out/.graphify_*`)
+
+Pipeline steps communicate through temp files under `graphify-out/`:
+
+| File | Written by | Read by | Content |
+|------|-----------|---------|---------|
+| `.graphify_detect.json` | `detect` / `update-detect` / `update-merge` | `ast-extract`, `cache-check`, `build`, `finalize` | Detected file list and statistics |
+| `.graphify_incremental.json` | `update-detect` | `update-merge` | Full incremental detection result (includes new_files, deleted_files) |
+| `.graphify_ast.json` | `ast-extract` | `merge-all` | AST-extracted nodes/edges |
+| `.graphify_uncached.txt` | `cache-check` | `prepare-semantic` | List of uncached files |
+| `.graphify_cached.json` | `cache-check` | `merge-semantic` | Nodes/edges loaded from cache |
+| `.graphify_prompt_N.txt` | `prepare-semantic` | LLM dispatch | Prompt for chunk N |
+| `.graphify_chunk_N.json` | LLM dispatch | `merge-semantic` | Extraction result for chunk N |
+| `.graphify_semantic.json` | `merge-semantic` | `merge-all` | Merged semantic extraction results |
+| `.graphify_extract.json` | `merge-all` / `update-merge` | `build`, `finalize` | Final merged extraction results |
+| `.graphify_analysis.json` | `build` | `label`, `export` | Clustering, God nodes, Surprises |
+| `.graphify_labels.json` | `label` | `export` | Community label mappings |
+
+All `.graphify_*` temp files are cleaned up during the `finalize` step.
+
+## Module Responsibilities
 
 | Module | Function | Input → Output |
 |--------|----------|----------------|
-| `detect.py` | `collect_files(root)` | directory → `[Path]` filtered list |
-| `extract.py` | `extract(path)` | file path → `{nodes, edges}` dict |
-| `build.py` | `build_graph(extractions)` | list of extraction dicts → `nx.Graph` |
-| `cluster.py` | `cluster(G)` | graph → graph with `community` attr on each node |
-| `analyze.py` | `analyze(G)` | graph → analysis dict (god nodes, surprises, questions) |
-| `report.py` | `render_report(G, analysis)` | graph + analysis → GRAPH_REPORT.md string |
-| `export.py` | `export(G, out_dir, ...)` | graph → Obsidian vault, graph.json, graph.html, graph.svg |
+| `pipeline.py` | CLI subcommands | skill invocations → structured JSON output + temp file management |
+| `detect.py` | `detect(root)` / `detect_incremental(root)` | directory → files dict + statistics |
+| `extract.py` | `extract(paths)` | file paths → `{nodes, edges}` dict |
+| `build.py` | `build_from_json(extraction)` | extraction dict → `nx.Graph` |
+| `cluster.py` | `cluster(G)` | graph → `{community_id: [node_ids]}` |
+| `analyze.py` | `god_nodes` / `surprising_connections` / `suggest_questions` | graph → analysis dicts |
+| `report.py` | `generate(G, ...)` | graph + analysis → GRAPH_REPORT.md string |
+| `export.py` | `to_json` / `to_html` / `to_obsidian` / `to_svg` / ... | graph → multiple output formats |
 | `ingest.py` | `ingest(url, ...)` | URL → file saved to corpus dir |
-| `cache.py` | `check_semantic_cache / save_semantic_cache` | files → (cached, uncached) split |
+| `cache.py` | `check_semantic_cache` / `save_semantic_cache` | files → (cached, uncached) split |
 | `security.py` | validation helpers | URL / path / label → validated or raises |
-| `validate.py` | `validate_extraction(data)` | extraction dict → raises on schema errors |
-| `serve.py` | `start_server(graph_path)` | graph file path → MCP stdio server |
-| `watch.py` | `watch(root, flag_path)` | directory → writes flag file on change |
+| `validate.py` | `validate_extraction(data)` | extraction dict → error list |
+| `serve.py` | MCP stdio server | graph file path → MCP tools for external AI clients |
+| `watch.py` | `watch(root, ...)` | directory → writes flag file on change |
 | `benchmark.py` | `run_benchmark(graph_path)` | graph file → corpus vs subgraph token comparison |
+| `wiki.py` | `to_wiki(G, ...)` | graph → Agent-crawlable wiki pages |
 
-## Extraction output schema
+## Extraction Output Schema
 
 Every extractor returns:
 
@@ -44,9 +120,9 @@ Every extractor returns:
 }
 ```
 
-`validate.py` enforces this schema before `build_graph()` consumes it.
+`validate.py` enforces this schema before `build_from_json()` consumes it.
 
-## Confidence labels
+## Confidence Labels
 
 | Label | Meaning |
 |-------|---------|
@@ -54,7 +130,7 @@ Every extractor returns:
 | `INFERRED` | Relationship is a reasonable deduction (e.g., call-graph second pass, co-occurrence in context) |
 | `AMBIGUOUS` | Relationship is uncertain; flagged for human review in GRAPH_REPORT.md |
 
-## Adding a new language extractor
+## Adding a New Language Extractor
 
 1. Add a `extract_<lang>(path: Path) -> dict` function in `extract.py` following the existing pattern (tree-sitter parse → walk nodes → collect `nodes` and `edges` → call-graph second pass for INFERRED `calls` edges).
 2. Register the file suffix in `extract()` dispatch and `collect_files()`.

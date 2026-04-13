@@ -53,7 +53,7 @@ If no path was given, use `.` (current directory). Do not ask the user for a pat
 
 - If the only flag is `--mcp` AND `graphify-out/graph.json` exists: Run `python -m graphify.serve graphify-out/graph.json` and stop. Do not run the pipeline.
 
-- If the only new flags are export-related (`--wiki`, `--obsidian`, `--svg`, `--graphml`) AND `graphify-out/graph.json` exists: Run `python -m graphify pipeline export-only [flags]` and stop. Do not run the pipeline.
+- If the only new flags are export-related (`--wiki`, `--obsidian`, `--svg`, `--graphml`) AND `graphify-out/graph.json` exists: Run `python -m graphify pipeline export [flags]` and stop. Do not run the pipeline.
 
 Follow these steps in order. Do not skip steps. **Important:** Run each command separately. Do NOT use `&&` to combine commands (PowerShell 5 does not support it).
 

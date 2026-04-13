@@ -53,7 +53,7 @@ graphify 的核心理念源於 Andrej Karpathy 的 /raw 資料夾工作流：將
 
 - 如果唯一 flag 是 `--mcp` 且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify.serve graphify-out/graph.json` 並停止。不要執行pipeline。
 
-- 如果唯一新增的 flags 與匯出相關（`--wiki`、`--obsidian`、`--svg`、`--graphml`）且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify pipeline export-only [flags]` 並停止。不要執行pipeline。
+- 如果唯一新增的 flags 與匯出相關（`--wiki`、`--obsidian`、`--svg`、`--graphml`）且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify pipeline export [flags]` 並停止。不要執行pipeline。
 
 請依照以下步驟順序執行，不可跳過任何步驟。**重要提示：**請分開執行每個指令，絕對不要使用 `&&` 來串接指令 (PowerShell 5 不支援)。
 
