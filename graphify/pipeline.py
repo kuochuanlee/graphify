@@ -889,6 +889,11 @@ def cmd_update_detect(args: list[str]) -> None:
     new_total = result.get("new_total", 0)
     _save_json(".graphify_incremental.json", result)
 
+    # 為了讓後續 extract 步驟只處理新檔案，我們同步寫入 .graphify_detect.json
+    detect_copy = result.copy()
+    detect_copy["files"] = result.get("new_files", {})
+    _save_json(".graphify_detect.json", detect_copy)
+
     # 沒有變更 → 停止
     if new_total == 0:
         _print_json({
@@ -985,6 +990,33 @@ def cmd_update_merge() -> None:
             print(f"New nodes: {', '.join(labels)}")
         if diff.get("new_edges"):
             print(f"New edges: {len(diff['new_edges'])}")
+
+    # 儲存合併後的完整圖譜至 .graphify_extract.json 供後續 cmd_build 讀取
+    nodes = []
+    for n, d in G_existing.nodes(data=True):
+        node = {"id": n}
+        node.update(d)
+        nodes.append(node)
+
+    edges = []
+    for u, v, d in G_existing.edges(data=True):
+        edge = {"source": d.get("_src", u), "target": d.get("_tgt", v)}
+        for k, val in d.items():
+            if k not in ('_src', '_tgt'):
+                edge[k] = val
+        edges.append(edge)
+
+    merged_extract = {
+        "nodes": nodes,
+        "edges": edges,
+        "hyperedges": G_existing.graph.get("hyperedges", []),
+        "input_tokens": new_extraction.get("input_tokens", 0),
+        "output_tokens": new_extraction.get("output_tokens", 0),
+    }
+    _save_json(".graphify_extract.json", merged_extract)
+
+    # 恢復完整的 .graphify_detect.json，確保報告的檔案總數正確，且不會覆蓋掉未變更檔案的 manifest
+    _save_json(".graphify_detect.json", incremental)
 
     # 清理備份和漸進式偵測資料
     for p in [backup_path, OUT_DIR / ".graphify_incremental.json"]:
