@@ -30,11 +30,11 @@ uv pip install -e "D:\gemini-cli\graphify"
 python -m graphify gemini install
 ```
 
-這會在專案產生 `GEMINI.md`，讓 AI 回答問題時，會先「自動」去讀圖譜報告，而不是傻傻地全域搜尋。裡面那段 `<!-- graphify -->` 包起來的英文文字，就是這個指令寫進去的。
+這會在專案產生 `GEMINI.md`，讓 AI 回答問題時，會先「自動」去讀圖譜報告，而不是傻傻地全域搜尋。裡面那段 `<!-- graphify -->` 包起來的英文文字，就是這個指令寫進去的。同時建立或更新 .gitignore 和 .graphifyignore 和 .geminiignore。
 
 ### 步驟四：在目標專案建立知識圖譜
 
-現在，確認您已經啟動了 `.venv`，然後在目標專案打開 Gemini CLI，並輸入：
+現在，確認您已經啟動了 `.venv`，然後在目標專案的 terminal 環境執行 gemini，打開 Gemini CLI，並輸入：
 
 ```
 /graphify .
@@ -52,11 +52,17 @@ python -m graphify gemini install
 
 ### 步驟六：利用 MCP 伺服器讓 AI 主動利用圖譜來回答問題
 
+#### 先確認目標專案安裝 mcp 套件
+
+```powershell
+uv pip install mcp
+```
+
 #### 啟動 MCP 伺服器
 讓 AI 會自己決定去呼叫你掛載的 graphify API 工具，做更精準細化的查詢。 請把最後面的路徑換成你實際的圖譜絕對路徑。在專案目錄下執行：
 
 ```powershell
-gemini mcp add graphify python -m graphify.serve "D:\gemini-cli\目標專案\graphify-out\graph.json"
+gemini mcp add graphify "D:\gemini-cli\目標專案\.venv\Scripts\python.exe" -m graphify.serve "D:\gemini-cli\目標專案\graphify-out\graph.json"
 ```
 
 這指令其實就是 Gemini CLI 會幫忙到專案目錄下的.gemini\settings.json 寫入 mcp server 設定，你也可以手動編輯。

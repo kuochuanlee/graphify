@@ -407,17 +407,91 @@ def gemini_install(project_dir: Path | None = None) -> None:
     """Write graphify section to GEMINI.md for Gemini CLI always-on integration."""
     import re
     project_dir = project_dir or Path(".")
+
+    # 更新或建立 .geminiignore 檔案
+    geminiignore = project_dir / ".geminiignore"
+    geminiignore_exists = geminiignore.exists()
+    geminiignore_content = geminiignore.read_text(encoding="utf-8") if geminiignore_exists else ""
+    
+    geminiignore_adds = []
+    lines = geminiignore_content.splitlines()
+    
+    if "!graphify-out" not in lines:
+        geminiignore_adds.append("!graphify-out")
+        
+    if "!graphify-out/.*" not in lines:
+        geminiignore_adds.append("!graphify-out/.*")
+    
+    if geminiignore_adds:
+        prefix = geminiignore_content
+        
+        if prefix and not prefix.endswith("\n"):
+            prefix += "\n"
+            
+        new_geminiignore = prefix + "\n".join(geminiignore_adds) + "\n"
+        geminiignore.write_text(new_geminiignore, encoding="utf-8")
+        
+        action = "updated" if geminiignore_exists else "created"
+        print(f"  .geminiignore  ->  {action} at {geminiignore}")
+
+    # 更新或建立 .gitignore 檔案
+    gitignore = project_dir / ".gitignore"
+    gitignore_exists = gitignore.exists()
+    gitignore_content = gitignore.read_text(encoding="utf-8") if gitignore_exists else ""
+    
+    if "graphify-out/" not in gitignore_content.splitlines():
+        prefix = gitignore_content
+        
+        if prefix and not prefix.endswith("\n"):
+            prefix += "\n"
+            
+        new_gitignore = prefix + "graphify-out/\n"
+        gitignore.write_text(new_gitignore, encoding="utf-8")
+        
+        action = "updated" if gitignore_exists else "created"
+        print(f"  .gitignore     ->  {action} at {gitignore}")
+
+    # 更新或建立 .graphifyignore 檔案
+    graphifyignore = project_dir / ".graphifyignore"
+    graphifyignore_exists = graphifyignore.exists()
+    graphifyignore_content = graphifyignore.read_text(encoding="utf-8") if graphifyignore_exists else ""
+    
+    graphifyignore_adds = []
+    lines = graphifyignore_content.splitlines()
+    
+    if ".gemini" not in lines:
+        graphifyignore_adds.append(".gemini")
+        
+    if ".gemini/.*" not in lines:
+        graphifyignore_adds.append(".gemini/.*")
+    
+    if graphifyignore_adds:
+        prefix = graphifyignore_content
+        
+        if prefix and not prefix.endswith("\n"):
+            prefix += "\n"
+            
+        new_graphifyignore = prefix + "\n".join(graphifyignore_adds) + "\n"
+        graphifyignore.write_text(new_graphifyignore, encoding="utf-8")
+        
+        action = "updated" if graphifyignore_exists else "created"
+        print(f"  .graphifyignore->  {action} at {graphifyignore}")
+
     gemini_md = project_dir / "GEMINI.md"
+    
     if gemini_md.exists():
         content = gemini_md.read_text(encoding="utf-8")
+        
         if _GEMINI_MD_MARKER in content:
-            print(f"  GEMINI.md  ->  already registered (no change)")
+            print(f"  GEMINI.md      ->  already registered (no change)")
             return
+            
         gemini_md.write_text(content.rstrip() + "\n" + _GEMINI_MD_SECTION, encoding="utf-8")
-        print(f"  GEMINI.md  ->  graphify section added at {gemini_md}")
+        print(f"  GEMINI.md      ->  graphify section added at {gemini_md}")
+        
     else:
         gemini_md.write_text(_GEMINI_MD_SECTION.lstrip(), encoding="utf-8")
-        print(f"  GEMINI.md  ->  created at {gemini_md}")
+        print(f"  GEMINI.md      ->  created at {gemini_md}")
 
 
 def gemini_uninstall(project_dir: Path | None = None) -> None:
