@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import sys
+import subprocess
 from pathlib import Path
 import networkx as nx
 from networkx.readwrite import json_graph
@@ -191,6 +192,41 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                     "required": ["source", "target"],
                 },
             ),
+            types.Tool(
+                name="git_status",
+                description="Get the status of the current git repository (short format). Shows modified, added, and deleted files.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "repo_path": {"type": "string", "default": ".", "description": "Optional repository path (default is current directory)."}
+                    }
+                },
+            ),
+            types.Tool(
+                name="git_diff",
+                description="Get the git diff for specific files or the entire repository. Use to review exact code changes.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "repo_path": {"type": "string", "default": ".", "description": "Optional repository path."},
+                        "target": {"type": "string", "description": "Optional specific file or directory path to diff. If omitted, shows all changes."},
+                        "staged": {"type": "boolean", "default": false, "description": "If true, shows staged changes (git diff --staged)."}
+                    }
+                },
+            ),
+            types.Tool(
+                name="read_file",
+                description="Read the contents of a specific file in the repository.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Absolute or relative path to the file to read."},
+                        "start_line": {"type": "integer", "description": "Optional starting line number (1-indexed)."},
+                        "end_line": {"type": "integer", "description": "Optional ending line number (inclusive)."}
+                    },
+                    "required": ["file_path"],
+                },
+            ),
         ]
 
     def _tool_query_graph(arguments: dict) -> str:
@@ -297,6 +333,157 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
             segments.append(f"--{rel}{conf_str}--> {G.nodes[v].get('label', v)}")
         return f"Shortest path ({hops} hops):\n  " + " ".join(segments)
 
+    def _tool_git_status(arguments: dict) -> str:
+        repo_path = arguments.get("repo_path", ".")
+        
+        # 執行 git status，加入 --no-pager 避免卡死
+        try:
+            result = subprocess.run(
+                ["git", "--no-pager", "status", "-s"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            # 檢查是否有輸出
+            if not result.stdout.strip():
+                return "No changes in the repository."
+                
+            return result.stdout
+            
+        except subprocess.CalledProcessError as e:
+            return f"Git command failed: {e.stderr}"
+            
+        except FileNotFoundError:
+            return "Git executable not found."
+
+
+    def _tool_git_diff(arguments: dict) -> str:
+        repo_path = arguments.get("repo_path", ".")
+        target = arguments.get("target", "")
+        staged = arguments.get("staged", False)
+        
+        # 組裝指令，強制關閉 pager
+        cmd = ["git", "--no-pager", "diff"]
+        
+        # 判斷是否只比較 staged 變更
+        if staged:
+            cmd.append("--staged")
+            
+        # 判斷是否有指定特定檔案
+        if target:
+            cmd.extend(["--", target])
+            
+        # 執行 git diff
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            # 檢查是否有變更
+            if not result.stdout.strip():
+                return f"No diff output. Ensure the target has {'staged' if staged else 'unstaged'} modifications, or it might be untracked."
+                
+            # 限制輸出大小，避免 Payload 超載；按行截斷避免切斷 hunk 中間
+            lines_out = result.stdout.splitlines(keepends=True)
+            if len(result.stdout) > 50000:
+                accumulated = []
+                total_chars = 0
+                for line in lines_out:
+                    if total_chars + len(line) > 50000:
+                        break
+                    accumulated.append(line)
+                    total_chars += len(line)
+                output = "".join(accumulated)
+                output += "\n\n... (Diff output truncated. Use 'target' argument to diff a specific file.)"
+                return output
+                
+            return result.stdout
+            
+        except subprocess.CalledProcessError as e:
+            return f"Git command failed: {e.stderr}"
+            
+        except FileNotFoundError:
+            return "Git executable not found."
+
+
+    def _tool_read_file(arguments: dict) -> str:
+        file_path = arguments.get("file_path", "")
+        start_line = arguments.get("start_line")   # 可為 None 或整數
+        end_line = arguments.get("end_line")       # 可為 None 或整數
+        
+        # 檢查檔名參數
+        if not file_path:
+            return "Error: file_path is required."
+            
+        # 讀取並處理檔案
+        try:
+            path = Path(file_path).resolve()
+            
+            # 安全邊界：只允許讀取當前工作目錄（CWD）底下的檔案，防止路徑穿越（Path Traversal）
+            cwd = Path.cwd().resolve()
+            try:
+                path.relative_to(cwd)
+            except ValueError:
+                return f"Error: Access denied. '{file_path}' is outside the working directory."
+            
+            # 確認檔案合法性
+            if not path.is_file():
+                return f"Error: '{file_path}' is not a file or does not exist."
+                
+            # 防止過大檔案導致記憶體問題
+            if path.stat().st_size > 10 * 1024 * 1024:
+                return "Error: File is too large (>10MB). Cannot read."
+            
+            # 讀取所有行數
+            lines = path.read_text(encoding="utf-8").splitlines()
+            total_lines = len(lines)
+            
+            # 計算起始行：明確用 None 判斷，避免 start_line=0 被誤判為未傳入
+            s = max(1, int(start_line)) if start_line is not None else 1
+            
+            # 計算結束行：明確用 None 判斷，避免 end_line=0 被誤判為未傳入
+            e = min(total_lines, int(end_line)) if end_line is not None else total_lines
+            
+            # 驗證範圍是否合理
+            if s > total_lines:
+                return f"Error: start_line={s} exceeds file length ({total_lines} lines)."
+                
+            if s > e:
+                return f"Error: Invalid line range {s}-{e}. start_line must be <= end_line."
+                
+            # 取出目標範圍的文字，回傳時附上行號資訊供 LLM 定位
+            selected_lines = lines[s-1:e]
+            header = f"[File: {path} | Lines: {s}-{e} of {total_lines}]\n"
+            content = "\n".join(selected_lines)
+            
+            # 針對太長的內容進行截斷（按行截斷避免截斷在程式碼中間）
+            if len(content) > 100000:
+                accumulated = []
+                total_chars = 0
+                for line in selected_lines:
+                    if total_chars + len(line) + 1 > 100000:
+                        break
+                    accumulated.append(line)
+                    total_chars += len(line) + 1
+                content = "\n".join(accumulated)
+                content += f"\n\n... (Content truncated. Read to line {s + len(accumulated) - 1}. Specify end_line to read further. Total lines: {total_lines})"
+            elif start_line is None and end_line is None and total_lines > 500:
+                content += f"\n\n--- (File has {total_lines} lines total. Use start_line and end_line for targeted reading.) ---"
+                
+            return header + content
+            
+        except UnicodeDecodeError:
+            return f"Error: File '{file_path}' is not valid UTF-8 text."
+            
+        except Exception as e:
+            return f"Error reading file: {e}"
+
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
@@ -305,6 +492,9 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         "god_nodes": _tool_god_nodes,
         "graph_stats": _tool_graph_stats,
         "shortest_path": _tool_shortest_path,
+        "git_status": _tool_git_status,
+        "git_diff": _tool_git_diff,
+        "read_file": _tool_read_file,
     }
 
     @server.call_tool()
