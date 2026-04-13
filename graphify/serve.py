@@ -234,6 +234,34 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                     "required": ["file_path"],
                 },
             ),
+            types.Tool(
+                name="list_directory",
+                description=(
+                    "Generate a file tree of the project directory. "
+                    "By default lists all tracked files (respects .gitignore via git ls-files). "
+                    "Falls back to plain filesystem walk if git is unavailable. "
+                    "Use this to understand the project structure before reading files."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "subdir": {
+                            "type": "string",
+                            "description": "Optional sub-directory path relative to project root (e.g. 'src'). Defaults to project root."
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "default": 5,
+                            "description": "Maximum directory depth to display (1-10). Default is 5."
+                        },
+                        "show_hidden": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "If true, includes hidden files/dirs (starting with '.'). Default is false."
+                        }
+                    }
+                },
+            ),
         ]
 
     def _tool_query_graph(arguments: dict) -> str:
@@ -512,6 +540,118 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         except Exception as e:
             return f"Error reading file: {e}"
 
+    def _tool_list_directory(arguments: dict) -> str:
+        subdir = arguments.get("subdir", "").strip()
+        max_depth = min(max(int(arguments.get("max_depth", 5)), 1), 10)
+        show_hidden = bool(arguments.get("show_hidden", False))
+
+        # 計算目標目錄（相對路徑以 _project_root 為基底走訪）
+        if subdir:
+            target_dir = (_project_root / subdir).resolve()
+        else:
+            target_dir = _project_root
+
+        # 安全邊界：只允許列出專案根目錄底下的目錄
+        try:
+            target_dir.relative_to(_project_root)
+        except ValueError:
+            return f"Error: Access denied. '{subdir}' is outside the project root ({_project_root})."
+
+        if not target_dir.is_dir():
+            return f"Error: '{subdir}' is not a directory or does not exist."
+
+        # 嘗試用 git ls-files 取得已追蹤的相對路徑清單（自動尊重 .gitignore）
+        # 若失敗則 fallback 到純 os.walk
+        tracked_paths: set[str] | None = None
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                cwd=str(_project_root),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # 取得相對於 _project_root 的路徑集合（含目錄前綴）
+                tracked_paths = set(result.stdout.splitlines())
+        except Exception:
+            # git 不可用時靜默降級
+            tracked_paths = None
+
+        # 依呼叫位置決定以哪個目錄為根節點
+        # 同時產生相對於 _project_root 的路徑前綴，用於 tracked_paths 過濾
+        try:
+            display_root = target_dir.relative_to(_project_root)
+        except ValueError:
+            display_root = target_dir
+
+        # 遞迴走訪目錄，產生縮排樹狀文字
+        lines: list[str] = [str(display_root) + "/"]
+
+        # 預設排除的噪音目錄（不論 show_hidden 設定）
+        _ALWAYS_EXCLUDE = {".git", "__pycache__", ".venv", "node_modules", ".mypy_cache", ".pytest_cache"}
+
+        def _walk(current: Path, prefix: str, depth: int) -> None:
+            if depth > max_depth:
+                return
+
+            # 收集並排序子項目（目錄優先，再按名稱字母排序）
+            try:
+                entries = sorted(current.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+            except PermissionError:
+                lines.append(prefix + "[Permission denied]")
+                return
+
+            for i, entry in enumerate(entries):
+                name = entry.name
+                is_last = (i == len(entries) - 1)
+
+                # 過濾隱藏項目
+                if not show_hidden and name.startswith("."):
+                    continue
+
+                # 永遠排除噪音目錄
+                if name in _ALWAYS_EXCLUDE:
+                    continue
+
+                # 若有 git 追蹤清單，過濾未被追蹤的路徑
+                if tracked_paths is not None:
+                    # 計算此 entry 相對於 _project_root 的路徑字串（統一用正斜線）
+                    try:
+                        rel = entry.relative_to(_project_root).as_posix()
+                    except ValueError:
+                        rel = entry.name
+
+                    # 目錄：只要 tracked_paths 中有任何以此路徑為前綴的項目，就顯示
+                    if entry.is_dir():
+                        rel_prefix = rel + "/"
+                        has_tracked = any(p.startswith(rel_prefix) or p == rel for p in tracked_paths)
+                        if not has_tracked:
+                            continue
+                    else:
+                        # 檔案：必須在追蹤清單中
+                        if rel not in tracked_paths:
+                            continue
+
+                # 產生樹狀分支符號
+                connector = "+-- " if is_last else "+-- "
+                lines.append(prefix + connector + name + ("/" if entry.is_dir() else ""))
+
+                # 遞迴進入目錄
+                if entry.is_dir():
+                    extension = "    " if is_last else "|   "
+                    _walk(entry, prefix + extension, depth + 1)
+
+        _walk(target_dir, "", 1)
+
+        # 輸出大小保護：超過 300 行時截斷並提示
+        if len(lines) > 300:
+            lines = lines[:300]
+            lines.append("... (output truncated at 300 lines. Use 'subdir' to narrow down.)")
+
+        return "\n".join(lines)
+
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
@@ -523,6 +663,7 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         "git_status": _tool_git_status,
         "git_diff": _tool_git_diff,
         "read_file": _tool_read_file,
+        "list_directory": _tool_list_directory,
     }
 
     @server.call_tool()
