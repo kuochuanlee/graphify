@@ -262,6 +262,86 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
                     }
                 },
             ),
+            types.Tool(
+                name="write_file",
+                description=(
+                    "Write full content to a file in the project. "
+                    "Creates the file (and any missing parent directories) if it does not exist, "
+                    "or overwrites it completely if it does. "
+                    "Best for creating new files or fully replacing small files. "
+                    "For partial edits to existing files, prefer edit_file instead. "
+                    "Relative paths are resolved from the project root. "
+                    "Writes are restricted to the project directory; .git/ is always blocked.\n"
+                    "IMPORTANT: There is NO delete or rename tool available. "
+                    "If you need to delete or rename a file, DO NOT overwrite it with empty content. "
+                    "Instead, advise the user in your text response to do it manually."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to write. Relative paths resolve from project root."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Full UTF-8 text content to write to the file."
+                        }
+                    },
+                    "required": ["file_path", "content"],
+                },
+            ),
+            types.Tool(
+                name="edit_file",
+                description=(
+                    "Edit an existing file. Supports three modes:\n"
+                    "1. SEARCH-REPLACE (default): Provide old_content and new_content. "
+                    "Exact match is tried first, then normalized whitespace fallback. "
+                    "Use start_line/end_line to narrow scope if needed.\n"
+                    "2. INSERT: Set old_content to empty string and provide start_line. "
+                    "new_content is inserted BEFORE that line.\n"
+                    "3. RANGE-REPLACE: Set replace_range=true with start_line and end_line. "
+                    "The entire line range is replaced with new_content. "
+                    "old_content is used as a short verification anchor (must exist in the range) "
+                    "to prevent accidental overwrites -- just provide a distinctive line, not the full block.\n"
+                    "Always call read_file first to confirm line numbers. "
+                    "Relative paths are resolved from the project root. "
+                    "Edits are restricted to the project directory; .git/ is always blocked.\n"
+                    "IMPORTANT: There is NO delete or rename tool available. "
+                    "If you need to delete or rename a file, advise the user in your text response to do it manually."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to edit. Relative paths resolve from project root."
+                        },
+                        "old_content": {
+                            "type": "string",
+                            "description": "Text to find and replace. Empty string triggers INSERT mode (requires start_line). In RANGE-REPLACE mode, acts as a short verification anchor."
+                        },
+                        "new_content": {
+                            "type": "string",
+                            "description": "Replacement text, or text to insert."
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": "1-indexed start line. Narrows search scope, or defines insert/range-replace position."
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "1-indexed end line (inclusive). Narrows search scope, or defines range-replace boundary."
+                        },
+                        "replace_range": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "If true, replaces the entire start_line-end_line range with new_content. old_content becomes a verification anchor only, saving tokens."
+                        }
+                    },
+                    "required": ["file_path", "old_content", "new_content"],
+                },
+            ),
         ]
 
     def _tool_query_graph(arguments: dict) -> str:
@@ -652,6 +732,304 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
 
         return "\n".join(lines)
 
+    def _normalize(s: str) -> str:
+        """將每行的前後空白去除，用於模糊比對時忽略縮排差異"""
+        return "\n".join(line.strip() for line in s.splitlines())
+
+    def _tool_write_file(arguments: dict) -> str:
+        file_path = arguments.get("file_path", "")
+        content = arguments.get("content")
+
+        # 檢查必要參數
+        if not file_path:
+            return "Error: file_path is required."
+
+        if content is None:
+            return "Error: content is required."
+
+        # 解析目標路徑（相對路徑以 _project_root 為基礎）
+        if Path(file_path).is_absolute():
+            path = Path(file_path).resolve()
+        else:
+            path = (_project_root / file_path).resolve()
+
+        # 安全邊界 1：必須在專案根目錄內
+        try:
+            path.relative_to(_project_root)
+        except ValueError:
+            return f"Error: Access denied. '{file_path}' is outside the project root ({_project_root})."
+
+        # 安全邊界 2：封鎖 .git/ 目錄，防止破壞 git 內部結構
+        try:
+            git_dir = (_project_root / ".git").resolve()
+            path.relative_to(git_dir)
+            return "Error: Access denied. Writing to .git/ is not allowed."
+        except ValueError:
+            pass
+
+        # 內容大小限制（防止意外寫入過大資料）
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > 5 * 1024 * 1024:
+            return "Error: Content exceeds 5MB limit."
+
+        # 自動建立不存在的父目錄（方便新增檔案到新子目錄）
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            is_new = not path.exists()
+
+            path.write_text(content, encoding="utf-8")
+
+            # 回傳確認資訊，讓 LLM 能驗證操作結果
+            line_count = content.count("\n") + (1 if content else 0)
+            rel_path = path.relative_to(_project_root)
+            action = "Created" if is_new else "Overwrote"
+            return (
+                f"{action}: {rel_path}\n"
+                f"Lines: {line_count}\n"
+                f"Bytes: {len(content_bytes)}\n"
+                f"Absolute path: {path}"
+            )
+
+        except PermissionError:
+            return f"Error: Permission denied writing to '{file_path}'."
+
+        except Exception as e:
+            return f"Error writing file: {e}"
+
+    def _tool_edit_file(arguments: dict) -> str:
+        file_path = arguments.get("file_path", "")
+        old_content = arguments.get("old_content")
+        new_content = arguments.get("new_content")
+        start_line = arguments.get("start_line")
+        end_line = arguments.get("end_line")
+        replace_range = bool(arguments.get("replace_range", False))
+
+        # 檢查必要參數
+        if not file_path:
+            return "Error: file_path is required."
+
+        if old_content is None:
+            return "Error: old_content is required."
+
+        if new_content is None:
+            return "Error: new_content is required."
+
+        # 解析目標路徑（相對路徑以 _project_root 為基礎）
+        if Path(file_path).is_absolute():
+            path = Path(file_path).resolve()
+        else:
+            path = (_project_root / file_path).resolve()
+
+        # 安全邊界 1：必須在專案根目錄內
+        try:
+            path.relative_to(_project_root)
+        except ValueError:
+            return f"Error: Access denied. '{file_path}' is outside the project root ({_project_root})."
+
+        # 安全邊界 2：封鎖 .git/ 目錄
+        try:
+            git_dir = (_project_root / ".git").resolve()
+            path.relative_to(git_dir)
+            return "Error: Access denied. Writing to .git/ is not allowed."
+        except ValueError:
+            pass
+
+        # 檔案必須存在（edit 不同於 write，不能建立新檔）
+        if not path.is_file():
+            return f"Error: '{file_path}' does not exist. Use write_file to create new files."
+
+        try:
+            full_text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return f"Error: File '{file_path}' is not valid UTF-8 text."
+
+        all_lines = full_text.splitlines(keepends=True)
+        total_lines = len(all_lines)
+        rel_path = path.relative_to(_project_root)
+
+        # =============================================
+        # 模式判定
+        # =============================================
+
+        # --- INSERT 模式：old_content 為空 + start_line 指定插入位置 ---
+        if old_content == "" and not replace_range:
+            if start_line is None:
+                return "Error: INSERT mode requires start_line. Set start_line to the line BEFORE which to insert."
+
+            insert_at = int(start_line)
+
+            if insert_at < 1 or insert_at > total_lines + 1:
+                return f"Error: start_line={insert_at} out of range. File has {total_lines} lines (use {total_lines + 1} to append)."
+
+            # 在指定行之前插入；確保 new_content 結尾有換行
+            insert_text = new_content if new_content.endswith("\n") else new_content + "\n"
+
+            before = "".join(all_lines[:insert_at - 1])
+            after = "".join(all_lines[insert_at - 1:])
+            new_text = before + insert_text + after
+
+            new_bytes = new_text.encode("utf-8")
+            if len(new_bytes) > 5 * 1024 * 1024:
+                return "Error: Edited file would exceed 5MB limit."
+
+            path.write_text(new_text, encoding="utf-8")
+
+            inserted_count = insert_text.count("\n")
+            new_total = new_text.count("\n") + 1
+            return (
+                f"Inserted at: {rel_path} (before line {insert_at})\n"
+                f"Lines inserted: {inserted_count}\n"
+                f"Total lines after edit: {new_total}\n"
+                f"Bytes: {len(new_bytes)}"
+            )
+
+        # --- RANGE-REPLACE 模式：行號範圍覆寫，old_content 僅作驗證錨點 ---
+        if replace_range:
+            if start_line is None or end_line is None:
+                return "Error: RANGE-REPLACE mode requires both start_line and end_line."
+
+            rs = max(1, int(start_line))
+            re_ = min(total_lines, int(end_line))
+
+            if rs > total_lines or rs > re_:
+                return f"Error: Invalid line range {rs}-{re_}. File has {total_lines} lines."
+
+            # 切出目標範圍的內容
+            range_text = "".join(all_lines[rs - 1:re_])
+
+            # old_content 作為驗證錨點：必須存在於該範圍內（精確或模糊）
+            anchor_found = old_content in range_text
+
+            if not anchor_found:
+                anchor_found = _normalize(old_content) in _normalize(range_text)
+
+            if not anchor_found:
+                preview = range_text[:500].rstrip()
+                return (
+                    f"Error: Verification anchor not found in lines {rs}-{re_}.\n"
+                    f"The old_content you provided does not exist in this range.\n"
+                    f"--- Actual content (first 500 chars) ---\n"
+                    f"{preview}\n"
+                    f"--- End preview ---\n"
+                    f"Hint: Use read_file to verify the content at these lines."
+                )
+
+            # 驗證通過，用 new_content 覆寫整個行號範圍
+            before = "".join(all_lines[:rs - 1])
+            after = "".join(all_lines[re_:])
+
+            # 確保接合處有換行（防止前後區塊黏在一起）
+            if new_content and not new_content.endswith("\n") and after:
+                new_text = before + new_content + "\n" + after
+            else:
+                new_text = before + new_content + after
+
+            new_bytes = new_text.encode("utf-8")
+            if len(new_bytes) > 5 * 1024 * 1024:
+                return "Error: Edited file would exceed 5MB limit."
+
+            path.write_text(new_text, encoding="utf-8")
+
+            old_line_count = re_ - rs + 1
+            new_line_count = new_text.count("\n") + 1
+            return (
+                f"Range-replaced: {rel_path} (lines {rs}-{re_})\n"
+                f"Old lines removed: {old_line_count}\n"
+                f"Total lines after edit: {new_line_count}\n"
+                f"Bytes: {len(new_bytes)}"
+            )
+
+        # --- SEARCH-REPLACE 模式（預設）：精確匹配 + 模糊 fallback ---
+
+        # 如果有提供 start_line / end_line，將搜尋範圍縮窄到該區段
+        if start_line is not None or end_line is not None:
+            s = max(1, int(start_line)) if start_line is not None else 1
+            e = min(total_lines, int(end_line)) if end_line is not None else total_lines
+
+            if s > total_lines or s > e:
+                return f"Error: Invalid line range {s}-{e}. File has {total_lines} lines."
+
+            scope_lines = all_lines[s - 1:e]
+            scope_text = "".join(scope_lines)
+            scope_offset = sum(len(l) for l in all_lines[:s - 1])
+        else:
+            scope_lines = all_lines
+            scope_text = full_text
+            scope_offset = 0
+            s = 1
+            e = total_lines
+
+        # 第一階段：精確匹配
+        match_pos = scope_text.find(old_content)
+        match_method = "exact"
+
+        # 第二階段：精確匹配失敗，嘗試去空白模糊匹配 (Fuzzy Fallback)
+        if match_pos == -1:
+            normalized_old = _normalize(old_content)
+            old_line_count = len(old_content.splitlines())
+            for i in range(len(scope_lines) - old_line_count + 1):
+                candidate = "".join(scope_lines[i:i + old_line_count])
+                if _normalize(candidate) == normalized_old:
+                    match_pos = sum(len(l) for l in scope_lines[:i])
+                    old_content = candidate
+                    match_method = "normalized"
+                    break
+
+        # 兩階段都失敗，回傳診斷資訊
+        if match_pos == -1:
+            preview_lines = scope_lines[:20]
+            preview = "".join(preview_lines).rstrip()
+            return (
+                f"Error: old_content not found in '{file_path}' "
+                f"(searched lines {s}-{e}).\n"
+                f"--- Actual content in range (first 20 lines) ---\n"
+                f"{preview}\n"
+                f"--- End preview ---\n"
+                f"Hint: Ensure old_content matches the file. "
+                f"Use read_file with start_line/end_line to verify."
+            )
+
+        # 檢查是否有多個匹配（在範圍內）
+        second_match = scope_text.find(old_content, match_pos + len(old_content))
+        if second_match != -1:
+            line_of_first = scope_text[:match_pos].count("\n") + s
+            line_of_second = scope_text[:second_match].count("\n") + s
+            total_in_scope = scope_text.count(old_content)
+            return (
+                f"Error: old_content appears {total_in_scope} times "
+                f"in lines {s}-{e}.\n"
+                f"First at line {line_of_first}, second at line {line_of_second}.\n"
+                f"Use start_line/end_line to narrow scope to a unique match."
+            )
+
+        # 執行替換（在全文中的絕對位置）
+        abs_pos = scope_offset + match_pos
+        new_text = (
+            full_text[:abs_pos]
+            + new_content
+            + full_text[abs_pos + len(old_content):]
+        )
+
+        # 內容大小限制
+        new_bytes = new_text.encode("utf-8")
+        if len(new_bytes) > 5 * 1024 * 1024:
+            return "Error: Edited file would exceed 5MB limit."
+
+        # 寫回檔案
+        path.write_text(new_text, encoding="utf-8")
+
+        # 回傳確認資訊
+        new_line_count = new_text.count("\n") + 1
+        match_line = full_text[:abs_pos].count("\n") + 1
+        return (
+            f"Edited: {rel_path}\n"
+            f"Match method: {match_method}\n"
+            f"Replaced at line: {match_line}\n"
+            f"Total lines after edit: {new_line_count}\n"
+            f"Bytes: {len(new_bytes)}"
+        )
+
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
@@ -663,6 +1041,8 @@ def serve(graph_path: str = "graphify-out/graph.json") -> None:
         "git_status": _tool_git_status,
         "git_diff": _tool_git_diff,
         "read_file": _tool_read_file,
+        "write_file": _tool_write_file,
+        "edit_file": _tool_edit_file,
         "list_directory": _tool_list_directory,
     }
 
