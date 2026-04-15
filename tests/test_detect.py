@@ -146,3 +146,49 @@ def test_detect_handles_circular_symlinks(tmp_path):
 
     result = detect(tmp_path, follow_symlinks=True)
     assert any("main.py" in f for f in result["files"]["code"])
+
+
+def test_detect_book_mode_false_for_small_corpus():
+    """一般小目錄不應觸發書本模式。"""
+    result = detect(FIXTURES)
+    assert result["book_mode"] is False
+    assert result["book_file"] is None
+
+
+def test_detect_book_mode_true_for_large_single_doc(tmp_path):
+    """單一大型 .md 檔案應觸發書本模式。"""
+    from graphify.split import BOOK_CHAR_THRESHOLD
+
+    book = tmp_path / "my_book.md"
+    # 產生超過門檻值的內容
+    book.write_text("# Chapter 1\n\n" + "Hello world. " * 5000, encoding="utf-8")
+    assert book.stat().st_size >= BOOK_CHAR_THRESHOLD
+
+    result = detect(tmp_path)
+    assert result["book_mode"] is True
+    assert result["book_file"] is not None
+    assert "my_book.md" in result["book_file"]
+
+
+def test_detect_book_mode_false_when_multiple_docs(tmp_path):
+    """多個 .md 檔案時不觸發書本模式（即使有大檔案）。"""
+    from graphify.split import BOOK_CHAR_THRESHOLD
+
+    (tmp_path / "a.md").write_text("x " * (BOOK_CHAR_THRESHOLD // 2 + 1), encoding="utf-8")
+    (tmp_path / "b.md").write_text("y " * 100, encoding="utf-8")
+
+    result = detect(tmp_path)
+    assert result["book_mode"] is False
+
+
+def test_detect_book_mode_with_non_doc_files(tmp_path):
+    """有圖片等非文件檔案時，只要 .md 只有一個就觸發。"""
+    from graphify.split import BOOK_CHAR_THRESHOLD
+
+    book = tmp_path / "book.md"
+    book.write_text("# Title\n\n" + "Content. " * 6000, encoding="utf-8")
+    (tmp_path / "photo.png").write_bytes(b"\x89PNG" + b"\x00" * 100)
+
+    result = detect(tmp_path)
+    assert result["book_mode"] is True
+    assert "book.md" in result["book_file"]

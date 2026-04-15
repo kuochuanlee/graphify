@@ -7,6 +7,8 @@ import re
 from enum import Enum
 from pathlib import Path
 
+from graphify.split import is_large_single_doc
+
 
 class FileType(str, Enum):
     CODE = "code"
@@ -394,6 +396,11 @@ def detect(root: Path, *, follow_symlinks: bool = False) -> dict:
             f"Consider running on a subfolder, or use --no-semantic to run AST-only."
         )
 
+    # 書本模式偵測
+    all_doc_paths = [Path(f) for f in files.get(FileType.DOCUMENT, [])]
+    book_file = is_large_single_doc(all_doc_paths)
+    book_mode = book_file is not None
+
     return {
         "files": {k.value: v for k, v in files.items()},
         "total_files": total_files,
@@ -402,6 +409,8 @@ def detect(root: Path, *, follow_symlinks: bool = False) -> dict:
         "warning": warning,
         "skipped_sensitive": skipped_sensitive,
         "graphifyignore_patterns": len(ignore_patterns),
+        "book_mode": book_mode,
+        "book_file": str(book_file) if book_file else None,
     }
 
 
