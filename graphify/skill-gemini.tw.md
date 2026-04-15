@@ -52,6 +52,8 @@ graphify 的核心理念源於 Andrej Karpathy 的 /raw 資料夾工作流：將
 
 **在執行任何步驟之前**，請檢查以下快捷方式條件：
 
+- 如果有 `--book` flag，或路徑內含單一大型文件：**完全跳過以下步驟。** 直接前往「用於 --book（書本模式）」段落，按照該段落的步驟執行。
+
 - 如果唯一 flag 是 `--mcp` 且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify.serve graphify-out/graph.json` 並停止。不要執行pipeline。
 
 - 如果唯一新增的 flags 與匯出相關（`--wiki`、`--obsidian`、`--svg`、`--graphml`）且 `graphify-out/graph.json` 檔案存在：執行 `python -m graphify pipeline export [flags]` 並停止。不要執行pipeline。
@@ -269,11 +271,18 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <
 python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
 ```
 
-產出：`book_chunks/` 內的 chunk 檔案、prompt 檔案、以及空的 AST stub。讀取 JSON 輸出中的 `total_chunks`。
+產出：`book_chunks/` 內的 chunk 檔案、prompt 檔案、以及空的 AST stub。讀取 JSON 輸出：
+- `total_chunks`：總 chunk 數
+- `completed_chunks`：先前執行已有有效結果的 chunk（已完成）
+- `remaining_chunks`：仍需 LLM 處理的 chunk
+
+如果 `remaining_chunks` 為空，表示所有 chunk 已完成，跳過 Book Step 3 直接前往 Book Step 4。
 
 ### Book Step 3 - 語意提取（LLM 步驟 - 由你處理）
 
-針對 1 到 `total_chunks` 的每個 chunk：
+僅處理 `remaining_chunks` 中列出的 chunk（不是全部 chunk）。
+
+針對 `remaining_chunks` 中的每個 chunk 索引 `i`：
 
 1. 讀取 prompt 檔案：`<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
 2. 檢查 prompt 中 METADATA header 是否有 "Images in this chunk:" 行
@@ -323,10 +332,10 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-fi
 ### Book Step 8 - 匯出
 
 ```
-python -m graphify pipeline --out-dir <book_folder>/graphify-out export [--obsidian] [--wiki]
+python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidian --wiki
 ```
 
-將使用者在原始呼叫中指定的 flags 原封不動傳入。
+書本模式預設產生 Obsidian 筆記庫和 wiki。如果使用者有指定其他 flags（`--svg`、`--graphml`）也一併加入。
 
 ### Book Step 9 - 收尾
 
@@ -344,7 +353,8 @@ Book graph complete. Outputs in <book_folder>/graphify-out/
   graph.html            - 互動式論證圖譜，用瀏覽器開啟
   GRAPH_REPORT.md       - 稽核報告
   graph.json            - 原始圖譜資料（Claim/Evidence 節點）
-  obsidian/             - Obsidian 筆記庫（僅當指定 --obsidian）
+  obsidian/             - Obsidian 筆記庫
+  wiki/                 - 可供 Agent 爬行的 wiki
 ```
 
 將 GRAPH_REPORT.md 中的以下三個段落貼入對話：

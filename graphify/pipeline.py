@@ -480,7 +480,11 @@ def _clean_stale_dispatch_files() -> None:
 
 
 def cmd_book_prepare() -> None:
-    """Book mode: 切割書本為 chunks，產生 prompt 檔案，建立空 AST stub。"""
+    """Book mode: 切割書本為 chunks，產生 prompt 檔案，建立空 AST stub。
+
+    支援續作：若先前已有有效的 .graphify_chunk_N.json，
+    會保留這些結果，只回報尚未完成的 chunk 供 LLM 處理。
+    """
     from graphify.split import split_book
 
     detect = _load_json(".graphify_detect.json")
@@ -493,14 +497,14 @@ def cmd_book_prepare() -> None:
     book_file = Path(detect["book_file"])
     chunk_dir = OUT_DIR / "book_chunks"
 
-    # 清除前次殘留的 dispatch 暫存檔
-    _clean_stale_dispatch_files()
+    # 只清除 prompt 暫存檔（保留 chunk 結果以支援續作）
+    for f in OUT_DIR.glob(".graphify_prompt_*.txt"):
+        f.unlink(missing_ok=True)
 
-    # 清除前次殘留的 chunk 目錄
+    # 重新切割書本（確定性操作，結果一致，執行快速）
     if chunk_dir.exists():
         shutil.rmtree(chunk_dir)
 
-    # 切割書本為 chunks
     chunks = split_book(book_file, chunk_dir)
     total = len(chunks)
 
@@ -525,6 +529,23 @@ def cmd_book_prepare() -> None:
         p.write_text(prompt, encoding="utf-8")
         prompt_files.append(str(p))
 
+    # 偵測已完成的 chunk（續作邏輯）
+    completed = []
+    remaining = []
+    for i in range(1, total + 1):
+        chunk_result = OUT_DIR / f".graphify_chunk_{i}.json"
+        if chunk_result.exists():
+            try:
+                data = json.loads(
+                    chunk_result.read_text(encoding="utf-8-sig")
+                )
+                if "nodes" in data and "edges" in data:
+                    completed.append(i)
+                    continue
+            except (json.JSONDecodeError, OSError):
+                pass
+        remaining.append(i)
+
     # Book mode 無 AST，建立空 stub
     _save_json(".graphify_ast.json", {
         "nodes": [],
@@ -533,14 +554,21 @@ def cmd_book_prepare() -> None:
         "output_tokens": 0,
     })
 
-    # 預估耗時（平行執行，每批約 45 秒）
-    est_time = 45 * ((total + 4) // 5)
+    # 預估耗時（僅計算剩餘 chunk，平行執行每批約 45 秒）
+    est_time = 45 * ((len(remaining) + 4) // 5)
 
     _print_json({
         "total_chunks": total,
+        "completed_chunks": completed,
+        "remaining_chunks": remaining,
         "prompt_files": prompt_files,
         "estimated_seconds": est_time,
-        "estimate_message": f"Book extraction: {total} chunks, estimated ~{est_time}s",
+        "estimate_message": (
+            f"Book extraction: {total} chunks total, "
+            f"{len(completed)} already done, "
+            f"{len(remaining)} remaining, "
+            f"estimated ~{est_time}s"
+        ),
     })
 
 

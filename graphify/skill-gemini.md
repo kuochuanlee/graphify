@@ -52,6 +52,8 @@ If no path was given, use `.` (current directory). Do not ask the user for a pat
 
 **Before running any steps**, check for these shortcut conditions:
 
+- If `--book` flag is present OR the path contains a single large document: **Skip the steps below entirely.** Go to the "For --book (Book Mode)" section and follow those steps instead.
+
 - If the only flag is `--mcp` AND `graphify-out/graph.json` exists: Run `python -m graphify.serve graphify-out/graph.json` and stop. Do not run the pipeline.
 
 - If the only new flags are export-related (`--wiki`, `--obsidian`, `--svg`, `--graphml`) AND `graphify-out/graph.json` exists: Run `python -m graphify pipeline export [flags]` and stop. Do not run the pipeline.
@@ -269,11 +271,18 @@ Read the JSON output and confirm `book_mode` is true. If not, fall back to the n
 python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
 ```
 
-Produces: chunk files in `book_chunks/`, prompt files, and an empty AST stub. Read `total_chunks` from the JSON output.
+Produces: chunk files in `book_chunks/`, prompt files, and an empty AST stub. Read the JSON output:
+- `total_chunks`: total number of chunks
+- `completed_chunks`: chunks with valid results from a previous run (already done)
+- `remaining_chunks`: chunks that still need LLM processing
+
+If `remaining_chunks` is empty, all chunks are already done - skip Book Step 3 and go directly to Book Step 4.
 
 ### Book Step 3 - Semantic extraction (LLM step - you handle this)
 
-For each chunk from 1 to `total_chunks`:
+Only process chunks listed in `remaining_chunks` (not all chunks).
+
+For each chunk index `i` in `remaining_chunks`:
 
 1. Read the prompt file: `<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
 2. Check the METADATA header inside the prompt for an "Images in this chunk:" line
@@ -323,10 +332,10 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-fi
 ### Book Step 8 - Export
 
 ```
-python -m graphify pipeline --out-dir <book_folder>/graphify-out export [--obsidian] [--wiki]
+python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidian --wiki
 ```
 
-Pass through the same flags the user specified in the original invocation.
+Book mode always generates Obsidian vault and wiki by default. Add other flags (`--svg`, `--graphml`) if the user requested them.
 
 ### Book Step 9 - Finalize
 
@@ -344,7 +353,8 @@ Book graph complete. Outputs in <book_folder>/graphify-out/
   graph.html            - interactive argumentation graph, open in browser
   GRAPH_REPORT.md       - audit report
   graph.json            - raw graph data (Claim/Evidence nodes)
-  obsidian/             - Obsidian vault (only if --obsidian)
+  obsidian/             - Obsidian vault
+  wiki/                 - agent-crawlable wiki
 ```
 
 Paste these sections from GRAPH_REPORT.md into the chat:
