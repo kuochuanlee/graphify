@@ -387,6 +387,18 @@ def cmd_merge_semantic() -> None:
         try:
             data = json.loads(Path(cf).read_text(encoding="utf-8-sig"))
             if "nodes" in data and "edges" in data:
+                # 幫 ID 加上前綴避免不同 chunk 之間發生碰撞
+                prefix = f"{Path(cf).stem}:"
+                for n in data["nodes"]:
+                    n["id"] = prefix + n["id"]
+                for e in data["edges"]:
+                    e["source"] = prefix + e["source"]
+                    e["target"] = prefix + e["target"]
+                if "hyperedges" in data:
+                    for he in data["hyperedges"]:
+                        if "contains" in he:
+                            he["contains"] = [prefix + cid for cid in he["contains"]]
+
                 all_nodes.extend(data["nodes"])
                 all_edges.extend(data["edges"])
                 all_hyperedges.extend(data.get("hyperedges", []))

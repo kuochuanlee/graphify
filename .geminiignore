@@ -1,3 +1,6 @@
 # Gemini CLI 專屬的忽略清單，用於控制忽略或強制追蹤特定目錄（例如取消忽略 graphify 的結果）
 !graphify-out
 !graphify-out/.*
+!book/
+!book/**/graphify-out/
+!book/**/graphify-out/**
