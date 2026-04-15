@@ -16,6 +16,7 @@ trigger: /graphify
 /graphify <path> --mode deep                          # 深度提取，產生更豐富的 INFERRED 關聯邊
 /graphify <path> --update                             # 漸進式更新 - 僅重新提取新增/變更的檔案
 /graphify <path> --book                               # 書本模式 - 提取 Claim/Evidence 論證圖譜
+/graphify <path> --book --with-images                  # 書本模式 + 多模態圖片分析（消耗更多 token）
 /graphify <path> --cluster-only                       # 針對既有圖譜重新執行分群
 /graphify <path> --no-viz                             # 跳過視覺化，僅產出報告 + JSON
 /graphify <path> --svg                                # 額外匯出 graph.svg
@@ -285,10 +286,10 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
 針對 `remaining_chunks` 中的每個 chunk 索引 `i`：
 
 1. 讀取 prompt 檔案：`<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
-2. 檢查 prompt 中 METADATA header 是否有 "Images in this chunk:" 行
-3. 如果有列出圖片：將那些圖片檔案（路徑相對於書本資料夾）與 prompt 一起送出進行多模態分析
-4. 將 prompt（加上圖片，如果有的話）送給 LLM
-5. 將原始 JSON 回應儲存至 `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+2. 將 prompt 文字送給 LLM
+3. 將原始 JSON 回應儲存至 `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+
+**僅當指定 `--with-images` 時：** 發送每個 prompt 前，檢查 METADATA header 是否有 "Images in this chunk:" 行。如果有列出圖片，將那些圖片檔案（路徑相對於書本資料夾）與 prompt 一起送出進行多模態分析。未指定 `--with-images` 時，忽略圖片引用，僅送文字。
 
 平行處理：同時處理最多 5 個 chunk。如果 chunk 因 429 錯誤失敗，等待 30 秒後重試一次。
 

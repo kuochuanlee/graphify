@@ -43,12 +43,16 @@ TYPE: Evidence
   FAIL: "Many studies show that practice improves performance." (no specifics — not Evidence)
 
 Node Fields:
+- label:
+  - Write in the same language as the source text (Chinese for Chinese books).
+  - MUST be a short, meaningful phrase (2-8 words) that acts as the real name of the node. Do NOT just copy the ID.
+  - For Chinese text: 必須提供有意義的中文字詞，2-10 個中文字 (e.g., "基因定序成本下降", "加速回報定律").
 - content:
   - Write in the same language as the source text.
-  - MUST be a complete, concise declarative sentence. Do not use pure noun labels.
+  - MUST be a complete, self-contained declarative sentence or paragraph summarizing the point.
   - Length constraints based on language:
-    - For English text: Maximum 150 characters (approx. 15-25 words).
-    - For Chinese text: Maximum 50 characters (不超過 50 個中文字).
+    - For English text: Maximum 300 characters.
+    - For Chinese text: Maximum 300 characters (深入總結內容，將最重要的細節與數據保留下來).
   - Do not copy the source text verbatim; synthesize the core point tightly.
 - aliases:
   - List synonyms, abbreviations, or variant phrasings the author uses for this concept in the chunk. Empty list [] if none.
@@ -84,6 +88,7 @@ Output exactly this JSON and nothing else:
     {
       "id": "node_001",
       "type": "Claim|Evidence",
+      "label": "短標題 (Short Label)",
       "content": "完整的陳述句 (Complete Sentence)",
       "aliases": [],
       "confidence_score": 0.9,

@@ -66,10 +66,14 @@ def _community_article(
             continue
         d = G.nodes[nid]
         node_label = d.get("label", nid)
+        content = d.get("content", "")
         src = d.get("source_file", "")
         degree = G.degree[nid]
         src_str = f" — `{src}`" if src else ""
-        lines.append(f"- **{node_label}** ({degree} connections){src_str}")
+        if content:
+            lines.append(f"- **{node_label}**: {content} ({degree} connections){src_str}")
+        else:
+            lines.append(f"- **{node_label}** ({degree} connections){src_str}")
     remaining = len(nodes) - len(top_nodes)
     if remaining > 0:
         lines.append(f"- *... and {remaining} more nodes in this community*")
@@ -113,6 +117,10 @@ def _god_node_article(G: nx.Graph, nid: str, labels: dict[int, str]) -> str:
 
     if community_name:
         lines += [f"**Community:** [[{community_name}]]", ""]
+
+    content = d.get("content", "")
+    if content:
+        lines += [f"**Content:** {content}", ""]
 
     # Group neighbors by relation type
     by_relation: dict[str, list[str]] = {}

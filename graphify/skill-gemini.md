@@ -16,6 +16,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify <path> --mode deep                          # thorough extraction, richer INFERRED edges
 /graphify <path> --update                             # incremental - re-extract only new/changed files
 /graphify <path> --book                               # book mode - extract Claim/Evidence argumentation graph
+/graphify <path> --book --with-images                  # book mode with multimodal image analysis (costs more tokens)
 /graphify <path> --cluster-only                       # rerun clustering on existing graph
 /graphify <path> --no-viz                             # skip visualization, just report + JSON
 /graphify <path> --svg                                # also export graph.svg
@@ -285,10 +286,10 @@ Only process chunks listed in `remaining_chunks` (not all chunks).
 For each chunk index `i` in `remaining_chunks`:
 
 1. Read the prompt file: `<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
-2. Check the METADATA header inside the prompt for an "Images in this chunk:" line
-3. If images are listed: include those image files (paths relative to the book folder) together with the prompt for multimodal analysis
-4. Send the prompt (+ images if any) to the LLM
-5. Save the raw JSON response to `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+2. Send the prompt text to the LLM
+3. Save the raw JSON response to `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+
+**Only if `--with-images` was specified:** Before sending each prompt, check the METADATA header for an "Images in this chunk:" line. If images are listed, include those image files (paths relative to the book folder) together with the prompt for multimodal analysis. Without `--with-images`, ignore image references and send text only.
 
 Parallelism: process up to 5 chunks concurrently. If a chunk fails with 429, wait 30 seconds and retry once.
 

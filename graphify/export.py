@@ -529,6 +529,10 @@ def to_obsidian(
             lines.append(f"  - {tag}")
         lines += ["---", "", f"# {label}", ""]
 
+        if data.get("content"):
+            lines.append(f"{data['content']}")
+            lines.append("")
+
         # Outgoing edges as wikilinks
         neighbors = list(G.neighbors(node_id))
         if neighbors:
