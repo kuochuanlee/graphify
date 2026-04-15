@@ -22,7 +22,7 @@ from string import Template
 
 # === 常數 ===
 
-# graphify-out 輸出目錄
+# graphify-out 輸出目錄（預設值，可由 --out-dir 參數覆蓋）
 OUT_DIR = Path("graphify-out")
 
 # 圖片副檔名（分 chunk 時每張圖片獨立一組）
@@ -452,6 +452,71 @@ def _clean_stale_dispatch_files() -> None:
     for pattern in [".graphify_chunk_*.json", ".graphify_prompt_*.txt"]:
         for f in OUT_DIR.glob(pattern):
             f.unlink(missing_ok=True)
+
+
+def cmd_book_prepare() -> None:
+    """Book mode: 切割書本為 chunks，產生 prompt 檔案，建立空 AST stub。"""
+    from graphify.split import split_book
+
+    detect = _load_json(".graphify_detect.json")
+
+    # 確認偵測結果為 book mode
+    if not detect.get("book_mode"):
+        print("ERROR: book_mode not detected.", file=sys.stderr)
+        sys.exit(1)
+
+    book_file = Path(detect["book_file"])
+    chunk_dir = OUT_DIR / "book_chunks"
+
+    # 清除前次殘留的 dispatch 暫存檔
+    _clean_stale_dispatch_files()
+
+    # 清除前次殘留的 chunk 目錄
+    if chunk_dir.exists():
+        shutil.rmtree(chunk_dir)
+
+    # 切割書本為 chunks
+    chunks = split_book(book_file, chunk_dir)
+    total = len(chunks)
+
+    # 載入 book prompt template
+    template_path = (
+        Path(__file__).parent / "templates" / "semantic_extraction_book.txt"
+    )
+    template_text = template_path.read_text(encoding="utf-8")
+    tmpl = Template(template_text)
+
+    # 產生每個 chunk 的 prompt 檔案
+    prompt_files = []
+    for i, chunk_path in enumerate(chunks, 1):
+        prompt = tmpl.safe_substitute(
+            CHUNK_NUM=str(i),
+            TOTAL_CHUNKS=str(total),
+            SOURCE_CHUNK=chunk_path.name,
+            CHUNK_TEXT=chunk_path.read_text(encoding="utf-8"),
+            CURRENT_HEADINGS="",
+        )
+        p = OUT_DIR / f".graphify_prompt_{i}.txt"
+        p.write_text(prompt, encoding="utf-8")
+        prompt_files.append(str(p))
+
+    # Book mode 無 AST，建立空 stub
+    _save_json(".graphify_ast.json", {
+        "nodes": [],
+        "edges": [],
+        "input_tokens": 0,
+        "output_tokens": 0,
+    })
+
+    # 預估耗時（平行執行，每批約 45 秒）
+    est_time = 45 * ((total + 4) // 5)
+
+    _print_json({
+        "total_chunks": total,
+        "prompt_files": prompt_files,
+        "estimated_seconds": est_time,
+        "estimate_message": f"Book extraction: {total} chunks, estimated ~{est_time}s",
+    })
 
 
 def cmd_merge_all() -> None:
@@ -1287,9 +1352,28 @@ def cmd_add(args: list[str]) -> None:
 # === 主要分派器 ===
 
 def main(args: list[str]) -> None:
-    """路由 pipeline subcommand。"""
+    """路由 pipeline subcommand。
+
+    支援 --out-dir <path> 全域參數，可在 subcommand 之前指定輸出目錄。
+    """
+    global OUT_DIR
+
+    # 解析全域參數 --out-dir（在 subcommand 之前）
+    filtered_args: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--out-dir" and i + 1 < len(args):
+            OUT_DIR = Path(args[i + 1])
+            OUT_DIR.mkdir(parents=True, exist_ok=True)
+            i += 2
+        else:
+            filtered_args.append(args[i])
+            i += 1
+
+    args = filtered_args
+
     if not args:
-        print("Usage: graphify pipeline <subcommand>", file=sys.stderr)
+        print("Usage: graphify pipeline [--out-dir <path>] <subcommand>", file=sys.stderr)
         print(file=sys.stderr)
         print("Subcommands:", file=sys.stderr)
         print("  check-install      Verify graphify is installed", file=sys.stderr)
@@ -1299,6 +1383,7 @@ def main(args: list[str]) -> None:
         print("  prepare-semantic   Split files, write prompt files", file=sys.stderr)
         print("  merge-semantic     Merge chunk results + cache", file=sys.stderr)
         print("  merge-all          Merge AST + semantic extraction", file=sys.stderr)
+        print("  book-prepare       Book mode: split book into chunks, generate prompts", file=sys.stderr)
         print("  build <path>       Build graph, cluster, analyze", file=sys.stderr)
         print("  label <json>       Apply community labels", file=sys.stderr)
         print("  export [flags]     Export HTML/SVG/Obsidian/Neo4j", file=sys.stderr)
@@ -1323,8 +1408,8 @@ def main(args: list[str]) -> None:
         "cache-check": lambda: cmd_cache_check(),
         "prepare-semantic": lambda: cmd_prepare_semantic(sub_args),
         "merge-semantic": lambda: cmd_merge_semantic(),
-
         "merge-all": lambda: cmd_merge_all(),
+        "book-prepare": lambda: cmd_book_prepare(),
         "build": lambda: cmd_build(sub_args),
         "label": lambda: cmd_label(sub_args),
         "export": lambda: cmd_export(sub_args),

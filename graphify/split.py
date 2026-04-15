@@ -16,6 +16,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# 圖片引用的 regex 模式（匹配 ![alt](path) 語法）
+_IMAGE_RE = re.compile(r"!\[.*?\]\((.*?)\)")
+
 # -- 可調整常數 -------------------------------------------------------
 BOOK_CHAR_THRESHOLD = 50_000   # 字元數超過此值才視為「書本」
 TARGET_CHUNK_SIZE   = 2_000    # 目標累積字數（在此大小附近的 ## 邊界切斷）
@@ -99,22 +102,26 @@ def split_book(source: Path, out_dir: Path) -> list[Path]:
 
     # METADATA header 相關狀態
     current_chunk_headings: list[str] = []   # 收集本 chunk 的標題，供 METADATA header 使用
+    current_chunk_images: list[str] = []     # 收集本 chunk 的圖片引用路徑
     book_title: str = source.stem            # 書名：取來源檔名（不含副檔名）
     # -----------------------------------------------------------------
 
     def flush() -> None:
         """將 current_lines 寫出為一個 chunk 檔案，並注入 METADATA header。"""
-        nonlocal chunk_index, current_lines, current_size, current_chunk_headings
+        nonlocal chunk_index, current_lines, current_size
+        nonlocal current_chunk_headings, current_chunk_images
 
         if not current_lines:
             return
 
         # 組合 METADATA header
         headings_str = " | ".join(current_chunk_headings) if current_chunk_headings else ""
+        images_str = " | ".join(current_chunk_images) if current_chunk_images else ""
         metadata_header = (
             f"[[METADATA_START]]\n"
             f"Book: {book_title}\n"
             f"Headings in this chunk: {headings_str}\n"
+            f"Images in this chunk: {images_str}\n"
             f"[[METADATA_END]]\n\n"
         )
 
@@ -137,6 +144,7 @@ def split_book(source: Path, out_dir: Path) -> list[Path]:
         current_lines = []
         current_size = 0
         current_chunk_headings = []   # flush 後清空標題收集
+        current_chunk_images = []     # flush 後清空圖片收集
 
     for line in lines:
         is_h1 = bool(re.match(r"^# (?!#)", line))   # 恰好一個 #
@@ -185,6 +193,11 @@ def split_book(source: Path, out_dir: Path) -> list[Path]:
             current_lines.append(pending_h1)
             current_size += len(pending_h1)
             pending_h1 = None
+
+        # 收集圖片引用路徑
+        for img_path in _IMAGE_RE.findall(line):
+            if img_path and img_path not in current_chunk_images:
+                current_chunk_images.append(img_path)
 
         current_lines.append(line)
         current_size += len(line)

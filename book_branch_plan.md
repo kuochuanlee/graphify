@@ -66,7 +66,7 @@ LLM multimodal API。
 Phase 0 | 環境準備：複製 split.py，確認 tests 能跑               [已完成]
 Phase 1 | split.py 改造：注入 METADATA header                    [已完成]
 Phase 2 | detect.py 改造：偵測書本模式                            [已完成]
-Phase 3 | pipeline.py 改造：--out-dir + book-prepare 子命令
+Phase 3 | pipeline.py 改造：--out-dir + book-prepare 子命令        [已完成]
 Phase 4 | 端對端冒煙測試：用真實書本跑通全流程
 Phase 5 | skill 文件更新：skill-gemini.md 加入 book mode 編排邏輯
 ```

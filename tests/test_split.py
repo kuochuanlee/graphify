@@ -207,20 +207,21 @@ class TestMetadataHeader:
         assert "第一章" in headings_lines[0], "第一個 chunk 應包含 H1 章標題"
 
     def test_metadata_format_structure(self, tmp_path):
-        """METADATA header 的格式應為固定的四行結構 + 空行分隔。"""
+        """METADATA header 的格式應為固定的五行結構 + 空行分隔。"""
         book = make_book(tmp_path)
         out = tmp_path / "chunks"
         chunks = split_book(book, out)
         first_text = chunks[0].read_text(encoding="utf-8")
         lines = first_text.splitlines()
 
-        # 前四行是 METADATA 結構
+        # 前五行是 METADATA 結構
         assert lines[0] == "[[METADATA_START]]"
         assert lines[1].startswith("Book: ")
         assert lines[2].startswith("Headings in this chunk: ")
-        assert lines[3] == "[[METADATA_END]]"
-        # 第五行是空行分隔
-        assert lines[4] == ""
+        assert lines[3].startswith("Images in this chunk: ")
+        assert lines[4] == "[[METADATA_END]]"
+        # 第六行是空行分隔
+        assert lines[5] == ""
 
     def test_no_header_book_has_empty_headings(self, tmp_path):
         """沒有任何標題的書本，METADATA 的 Headings 行應為空。"""
@@ -231,3 +232,87 @@ class TestMetadataHeader:
         text = chunks[0].read_text(encoding="utf-8")
         assert "Headings in this chunk: \n" in text or \
                "Headings in this chunk: \r\n" in text
+
+
+# -- 圖片引用收集驗證 -----------------------------------------------
+
+class TestImageCollection:
+
+    def test_metadata_contains_images_line(self, tmp_path):
+        """每個 chunk 的 METADATA 都應包含 Images in this chunk 行。"""
+        book = make_book(tmp_path)
+        out = tmp_path / "chunks"
+        for chunk in split_book(book, out):
+            text = chunk.read_text(encoding="utf-8")
+            assert "Images in this chunk:" in text, \
+                f"{chunk.name} 缺少 Images 行"
+
+    def test_images_collected_in_metadata(self, tmp_path):
+        """包含圖片引用的書本，METADATA 應收集圖片路徑。"""
+        content = (
+            "# 第一章\n\n"
+            "## 1.1 测试\n\n"
+            "這是活字龍 \n" * 300 + "\n"
+            "![fig1](images/fig1.png)\n"
+            "更多內容 \n" * 100 + "\n"
+            "![fig2](images/fig2.jpg)\n"
+        )
+        book = tmp_path / "book_with_images.md"
+        book.write_text(content, encoding="utf-8")
+        out = tmp_path / "chunks"
+        chunks = split_book(book, out)
+
+        # 查找包含圖片的 chunk
+        found_images = False
+        for chunk in chunks:
+            text = chunk.read_text(encoding="utf-8")
+            images_lines = [
+                l for l in text.splitlines()
+                if l.startswith("Images in this chunk:")
+            ]
+            if images_lines and images_lines[0] != "Images in this chunk: ":
+                found_images = True
+                # 確認圖片路徑被收集
+                images_content = images_lines[0]
+                assert "images/" in images_content
+
+        assert found_images, "沒有任何 chunk 收集到圖片引用"
+
+    def test_no_images_has_empty_images_line(self, tmp_path):
+        """沒有圖片的書本，Images 行應為空。"""
+        book = make_book(tmp_path)
+        out = tmp_path / "chunks"
+        chunks = split_book(book, out)
+        text = chunks[0].read_text(encoding="utf-8")
+        images_lines = [
+            l for l in text.splitlines()
+            if l.startswith("Images in this chunk:")
+        ]
+        assert len(images_lines) == 1
+        assert images_lines[0] == "Images in this chunk: "
+
+    def test_duplicate_images_not_repeated(self, tmp_path):
+        """同一張圖片在 chunk 內出現多次，METADATA 只應記錄一次。"""
+        content = (
+            "# 第一章\n\n"
+            "## 1.1 测试\n\n"
+            "![fig](images/same.png)\n"
+            "內容 \n" * 100 + "\n"
+            "![fig](images/same.png)\n"
+        )
+        book = tmp_path / "dup_img.md"
+        book.write_text(content, encoding="utf-8")
+        out = tmp_path / "chunks"
+        chunks = split_book(book, out)
+
+        for chunk in chunks:
+            text = chunk.read_text(encoding="utf-8")
+            images_lines = [
+                l for l in text.splitlines()
+                if l.startswith("Images in this chunk:")
+            ]
+            for il in images_lines:
+                # 如果有圖片，計算 same.png 出現次數應該最多 1 次
+                if "same.png" in il:
+                    assert il.count("same.png") == 1, \
+                        "重複圖片不應在 METADATA 中重複出現"
