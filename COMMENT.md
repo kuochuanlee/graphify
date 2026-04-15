@@ -43,3 +43,11 @@ gemini mcp add graphify python -m graphify.serve "D:\gemini-cli\book\<書名>\gr
 ```powershell
 gemini mcp remove graphify
 ```
+
+## 未來待做事項
+
+- [ ] 優化語意分析功能，可改多次LLM處理，加強schema的設計方式
+- [ ] 增加前置的處理，改善分割方式，和引入詞頻分析來輔助
+- [ ] 增加 LLM 外包功能的流程設計
+
+

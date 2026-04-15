@@ -47,15 +47,7 @@ Three things it does that an LLM alone cannot:
 
 Follow these steps in order:
 
-### Step 1 - Ensure graphify is installed
-
-```
-python -m graphify pipeline check-install
-```
-
-If it prints an error, tell the user and stop. Otherwise proceed silently.
-
-### Step 2 - Detect
+### Step 1 - Detect
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <book_folder>/
@@ -63,7 +55,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <
 
 Read the JSON output to confirm detection succeeded.
 
-### Step 3 - Prepare chunks and prompts
+### Step 2 - Prepare chunks and prompts
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
@@ -74,9 +66,9 @@ Produces: chunk files in `book_chunks/`, prompt files, and an empty AST stub. Re
 - `completed_chunks`: chunks with valid results from a previous run (already done)
 - `remaining_chunks`: chunks that still need LLM processing
 
-If `remaining_chunks` is empty, all chunks are already done - skip Step 4 and go directly to Step 5.
+If `remaining_chunks` is empty, all chunks are already done - skip Step 3 and go directly to Step 4.
 
-### Step 4 - Semantic extraction (LLM step - you handle this)
+### Step 3 - Semantic extraction (LLM step - you handle this)
 
 Only process chunks listed in `remaining_chunks` (not all chunks).
 
@@ -95,7 +87,7 @@ Schema constraints for each chunk JSON response:
 - `edges[].type`: only `"supports"`, `"refines"`, or `"conflicts"`
 - Must include: `{"nodes": [...], "edges": [...], "hyperedges": []}`
 
-### Step 5 - Merge semantic results
+### Step 4 - Merge semantic results
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
@@ -103,13 +95,13 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
 
 If the output status says it failed, re-run only the failed chunks, then run merge-semantic again.
 
-### Step 6 - Merge all
+### Step 5 - Merge all
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-all
 ```
 
-### Step 7 - Build graph, cluster, analyze
+### Step 6 - Build graph, cluster, analyze
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_folder>/
@@ -117,7 +109,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_fol
 
 If it exits with error (empty graph), stop and tell the user.
 
-### Step 8 - Label communities (LLM step - you handle this)
+### Step 7 - Label communities (LLM step - you handle this)
 
 Read `<book_folder>/graphify-out/.graphify_analysis.json`. For each community key, look at its node labels and assign a 2-5 word human-readable name (e.g. "Moore's Law Evidence", "Computational Limits", "Neural Architecture Claims").
 
@@ -127,7 +119,7 @@ Write the labels to `<book_folder>/graphify-out/labels_draft.json`, then apply:
 python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-file <book_folder>/graphify-out/labels_draft.json --path <book_folder>/
 ```
 
-### Step 9 - Export
+### Step 8 - Export
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidian --wiki
@@ -135,7 +127,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidi
 
 Book mode always generates Obsidian vault and wiki by default. Add other flags (`--svg`, `--graphml`) if the user requested them.
 
-### Step 10 - Finalize
+### Step 9 - Finalize
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out finalize <book_folder>/

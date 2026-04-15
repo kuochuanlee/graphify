@@ -47,15 +47,7 @@ graphify 處理自然語言文本，產出結構化的 Claim/Evidence 論證圖�
 
 請依照以下步驟順序執行：
 
-### Step 1 - 確認 graphify 已安裝
-
-```
-python -m graphify pipeline check-install
-```
-
-如果印出錯誤，告知使用者並停止。否則靜默繼續。
-
-### Step 2 - 偵測
+### Step 1 - 偵測
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <book_folder>/
@@ -63,7 +55,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <
 
 讀取 JSON 輸出確認偵測成功。
 
-### Step 3 - 準備 chunk 及 prompt 檔案
+### Step 2 - 準備 chunk 及 prompt 檔案
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
@@ -74,9 +66,9 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
 - `completed_chunks`：先前執行已有有效結果的 chunk（已完成）
 - `remaining_chunks`：仍需 LLM 處理的 chunk
 
-如果 `remaining_chunks` 為空，表示所有 chunk 已完成，跳過 Step 4 直接前往 Step 5。
+如果 `remaining_chunks` 為空，表示所有 chunk 已完成，跳過 Step 3 直接前往 Step 4。
 
-### Step 4 - 語意提取（LLM 步驟 - 由你處理）
+### Step 3 - 語意提取（LLM 步驟 - 由你處理）
 
 僅處理 `remaining_chunks` 中列出的 chunk（不是全部 chunk）。
 
@@ -95,7 +87,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
 - `edges[].type`：僅限 `"supports"`、`"refines"` 或 `"conflicts"`
 - 必須包含：`{"nodes": [...], "edges": [...], "hyperedges": []}`
 
-### Step 5 - 合併語意結果
+### Step 4 - 合併語意結果
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
@@ -103,13 +95,13 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
 
 如果輸出狀態顯示失敗，只重新執行失敗的 chunk，然後再次執行 merge-semantic。
 
-### Step 6 - 合併全部
+### Step 5 - 合併全部
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-all
 ```
 
-### Step 7 - 建立圖譜、分群、分析
+### Step 6 - 建立圖譜、分群、分析
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_folder>/
@@ -117,7 +109,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_fol
 
 如果以錯誤結束（空圖譜），停止並告知使用者。
 
-### Step 8 - 為社群命名標記（LLM 步驟 - 由你處理）
+### Step 7 - 為社群命名標記（LLM 步驟 - 由你處理）
 
 讀取 `<book_folder>/graphify-out/.graphify_analysis.json`。針對每個社群鍵值，查看其節點名稱並指定 2-5 個字的人類可讀名稱（例如 "Moore's Law Evidence"、"Computational Limits"、"Neural Architecture Claims"）。
 
@@ -127,7 +119,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_fol
 python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-file <book_folder>/graphify-out/labels_draft.json --path <book_folder>/
 ```
 
-### Step 9 - 匯出
+### Step 8 - 匯出
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidian --wiki
@@ -135,7 +127,7 @@ python -m graphify pipeline --out-dir <book_folder>/graphify-out export --obsidi
 
 書本模式預設產生 Obsidian 筆記庫和 wiki。如果使用者有指定其他 flags（`--svg`、`--graphml`）也一併加入。
 
-### Step 10 - 收尾
+### Step 9 - 收尾
 
 ```
 python -m graphify pipeline --out-dir <book_folder>/graphify-out finalize <book_folder>/
