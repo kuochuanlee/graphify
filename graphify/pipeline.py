@@ -98,14 +98,36 @@ def cmd_check_install() -> None:
 
 def cmd_detect(args: list[str]) -> None:
     """Step 2: 偵測檔案，輸出帶有 action 決策欄位的 JSON。"""
-    if not args:
+    # 解析 --book flag 與路徑參數
+    force_book = "--book" in args
+    positional = [a for a in args if not a.startswith("--")]
+
+    if not positional:
         print("error: missing path argument", file=sys.stderr)
         sys.exit(1)
 
     from graphify.detect import detect
 
-    path = args[0]
+    path = positional[0]
     result = detect(Path(path))
+
+    # --book 強制模式：跳過 BOOK_CHAR_THRESHOLD 自動偵測，
+    # 直接找最大的 .md/.txt 檔案作為 book_file
+    if force_book and not result.get("book_mode"):
+        doc_files = [
+            Path(f) for f in result.get("files", {}).get("document", [])
+        ]
+        if doc_files:
+            # 選擇最大的文件檔案作為書本
+            largest = max(doc_files, key=lambda p: p.stat().st_size)
+            result["book_mode"] = True
+            result["book_file"] = str(largest)
+        else:
+            print(
+                "ERROR: --book specified but no .md/.txt files found.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # 程式化決策邏輯（原本散落在 skill 中用自然語言描述）
     action = "proceed"
@@ -114,12 +136,12 @@ def cmd_detect(args: list[str]) -> None:
     total_words = result.get("total_words", 0)
     files = result.get("files", {})
 
-    # 沒有檔案 → 停止
-    if total_files == 0:
+    # 沒有檔案 → 停止（book mode 下只要有 book_file 就繼續）
+    if total_files == 0 and not result.get("book_mode"):
         action = "stop"
 
-    # 語料庫過大 → 詢問使用者選擇子目錄
-    elif total_words > 2_000_000 or total_files > 200:
+    # 語料庫過大 → 詢問使用者選擇子目錄（book mode 不適用此檢查）
+    elif not result.get("book_mode") and (total_words > 2_000_000 or total_files > 200):
         action = "ask_user"
         dir_counts: dict[str, int] = defaultdict(int)
         for cat_files in files.values():
@@ -149,6 +171,8 @@ def cmd_detect(args: list[str]) -> None:
 
     # 格式化摘要
     summary_lines = [f"Corpus: {total_files} files ~ ~{total_words:,} words"]
+    if result.get("book_mode"):
+        summary_lines.append(f"  Book mode: {result.get('book_file', 'unknown')}")
     for cat, flist in files.items():
         if flist:
             exts = sorted(set(Path(f).suffix for f in flist[:10]))[:5]
@@ -169,6 +193,7 @@ def cmd_detect(args: list[str]) -> None:
         "total_words": total_words,
         "skipped_count": len(skipped),
         "code_only": code_only,
+        "book_mode": result.get("book_mode", False),
     })
 
 

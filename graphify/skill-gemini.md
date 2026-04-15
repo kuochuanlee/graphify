@@ -15,6 +15,7 @@ Turn any folder of files into a navigable knowledge graph with community detecti
 /graphify <path>                                      # full pipeline on specific path
 /graphify <path> --mode deep                          # thorough extraction, richer INFERRED edges
 /graphify <path> --update                             # incremental - re-extract only new/changed files
+/graphify <path> --book                               # book mode - extract Claim/Evidence argumentation graph
 /graphify <path> --cluster-only                       # rerun clustering on existing graph
 /graphify <path> --no-viz                             # skip visualization, just report + JSON
 /graphify <path> --svg                                # also export graph.svg
@@ -241,6 +242,115 @@ python -m graphify pipeline cluster-only
 ```
 
 Then run Steps 5-9 (label, export, benchmark, finalize).
+
+---
+
+## For --book (Book Mode)
+
+Trigger: user runs `/graphify <book_folder> --book`, or detect result has `book_mode: true`.
+
+Book mode processes natural language texts (books, long documents) and produces a Claim/Evidence argumentation graph instead of a code knowledge graph.
+
+**Important:** All pipeline commands below use `--out-dir <book_folder>/graphify-out` to place outputs inside the book folder.
+
+Follow these steps in order:
+
+### Book Step 1 - Detect
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <book_folder>/
+```
+
+Read the JSON output and confirm `book_mode` is true. If not, fall back to the normal pipeline.
+
+### Book Step 2 - Prepare chunks and prompts
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
+```
+
+Produces: chunk files in `book_chunks/`, prompt files, and an empty AST stub. Read `total_chunks` from the JSON output.
+
+### Book Step 3 - Semantic extraction (LLM step - you handle this)
+
+For each chunk from 1 to `total_chunks`:
+
+1. Read the prompt file: `<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
+2. Check the METADATA header inside the prompt for an "Images in this chunk:" line
+3. If images are listed: include those image files (paths relative to the book folder) together with the prompt for multimodal analysis
+4. Send the prompt (+ images if any) to the LLM
+5. Save the raw JSON response to `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+
+Parallelism: process up to 5 chunks concurrently. If a chunk fails with 429, wait 30 seconds and retry once.
+
+Schema constraints for each chunk JSON response:
+- `nodes[].type`: only `"Claim"` or `"Evidence"`
+- `edges[].type`: only `"supports"`, `"refines"`, or `"conflicts"`
+- Must include: `{"nodes": [...], "edges": [...], "hyperedges": []}`
+
+### Book Step 4 - Merge semantic results
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
+```
+
+If the output status says it failed, re-run only the failed chunks, then run merge-semantic again.
+
+### Book Step 5 - Merge all
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-all
+```
+
+### Book Step 6 - Build graph, cluster, analyze
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_folder>/
+```
+
+If it exits with error (empty graph), stop and tell the user.
+
+### Book Step 7 - Label communities (LLM step - you handle this)
+
+Read `<book_folder>/graphify-out/.graphify_analysis.json`. For each community key, look at its node labels and assign a 2-5 word human-readable name (e.g. "Moore's Law Evidence", "Computational Limits", "Neural Architecture Claims").
+
+Write the labels to `<book_folder>/graphify-out/labels_draft.json`, then apply:
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-file <book_folder>/graphify-out/labels_draft.json --path <book_folder>/
+```
+
+### Book Step 8 - Export
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out export [--obsidian] [--wiki]
+```
+
+Pass through the same flags the user specified in the original invocation.
+
+### Book Step 9 - Finalize
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out finalize <book_folder>/
+```
+
+**After finalize completes, stop. Do not retry any failed steps.**
+
+Then tell the user:
+
+```
+Book graph complete. Outputs in <book_folder>/graphify-out/
+
+  graph.html            - interactive argumentation graph, open in browser
+  GRAPH_REPORT.md       - audit report
+  graph.json            - raw graph data (Claim/Evidence nodes)
+  obsidian/             - Obsidian vault (only if --obsidian)
+```
+
+Paste these sections from GRAPH_REPORT.md into the chat:
+- God Nodes
+- Surprising Connections
+- Suggested Questions
 
 ---
 

@@ -15,6 +15,7 @@ trigger: /graphify
 /graphify <path>                                      # 在指定路徑執行完整管線
 /graphify <path> --mode deep                          # 深度提取，產生更豐富的 INFERRED 關聯邊
 /graphify <path> --update                             # 漸進式更新 - 僅重新提取新增/變更的檔案
+/graphify <path> --book                               # 書本模式 - 提取 Claim/Evidence 論證圖譜
 /graphify <path> --cluster-only                       # 針對既有圖譜重新執行分群
 /graphify <path> --no-viz                             # 跳過視覺化，僅產出報告 + JSON
 /graphify <path> --svg                                # 額外匯出 graph.svg
@@ -241,6 +242,115 @@ python -m graphify pipeline cluster-only
 ```
 
 然後執行 Steps 5-9（命名、匯出、基準測試、收尾）。
+
+---
+
+## 用於 --book（書本模式）
+
+觸發條件：使用者執行 `/graphify <book_folder> --book`，或偵測結果中 `book_mode` 為 true。
+
+書本模式處理自然語言文本（書籍、長篇文件），產出 Claim/Evidence 論證圖譜，而非程式碼知識圖譜。
+
+**重要：** 以下所有 pipeline 指令都使用 `--out-dir <book_folder>/graphify-out`，將輸出放在書本資料夾內。
+
+請依序執行以下步驟：
+
+### Book Step 1 - 偵測
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out detect --book <book_folder>/
+```
+
+讀取 JSON 輸出確認 `book_mode` 為 true。如果不是，回退到一般管線。
+
+### Book Step 2 - 準備 chunk 及 prompt 檔案
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out book-prepare
+```
+
+產出：`book_chunks/` 內的 chunk 檔案、prompt 檔案、以及空的 AST stub。讀取 JSON 輸出中的 `total_chunks`。
+
+### Book Step 3 - 語意提取（LLM 步驟 - 由你處理）
+
+針對 1 到 `total_chunks` 的每個 chunk：
+
+1. 讀取 prompt 檔案：`<book_folder>/graphify-out/.graphify_prompt_<i>.txt`
+2. 檢查 prompt 中 METADATA header 是否有 "Images in this chunk:" 行
+3. 如果有列出圖片：將那些圖片檔案（路徑相對於書本資料夾）與 prompt 一起送出進行多模態分析
+4. 將 prompt（加上圖片，如果有的話）送給 LLM
+5. 將原始 JSON 回應儲存至 `<book_folder>/graphify-out/.graphify_chunk_<i>.json`
+
+平行處理：同時處理最多 5 個 chunk。如果 chunk 因 429 錯誤失敗，等待 30 秒後重試一次。
+
+每個 chunk JSON 回應的 Schema 約束：
+- `nodes[].type`：僅限 `"Claim"` 或 `"Evidence"`
+- `edges[].type`：僅限 `"supports"`、`"refines"` 或 `"conflicts"`
+- 必須包含：`{"nodes": [...], "edges": [...], "hyperedges": []}`
+
+### Book Step 4 - 合併語意結果
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-semantic
+```
+
+如果輸出狀態顯示失敗，只重新執行失敗的 chunk，然後再次執行 merge-semantic。
+
+### Book Step 5 - 合併全部
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out merge-all
+```
+
+### Book Step 6 - 建立圖譜、分群、分析
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out build <book_folder>/
+```
+
+如果以錯誤結束（空圖譜），停止並告知使用者。
+
+### Book Step 7 - 為社群命名標記（LLM 步驟 - 由你處理）
+
+讀取 `<book_folder>/graphify-out/.graphify_analysis.json`。針對每個社群鍵值，查看其節點名稱並指定 2-5 個字的人類可讀名稱（例如 "Moore's Law Evidence"、"Computational Limits"、"Neural Architecture Claims"）。
+
+將標籤寫出至 `<book_folder>/graphify-out/labels_draft.json`，然後套用：
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out label --from-file <book_folder>/graphify-out/labels_draft.json --path <book_folder>/
+```
+
+### Book Step 8 - 匯出
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out export [--obsidian] [--wiki]
+```
+
+將使用者在原始呼叫中指定的 flags 原封不動傳入。
+
+### Book Step 9 - 收尾
+
+```
+python -m graphify pipeline --out-dir <book_folder>/graphify-out finalize <book_folder>/
+```
+
+**在 finalize 執行完畢後停止。不要重試任何失敗的步驟。**
+
+然後告知使用者：
+
+```
+Book graph complete. Outputs in <book_folder>/graphify-out/
+
+  graph.html            - 互動式論證圖譜，用瀏覽器開啟
+  GRAPH_REPORT.md       - 稽核報告
+  graph.json            - 原始圖譜資料（Claim/Evidence 節點）
+  obsidian/             - Obsidian 筆記庫（僅當指定 --obsidian）
+```
+
+將 GRAPH_REPORT.md 中的以下三個段落貼入對話：
+- God Nodes（上帝節點）
+- Surprising Connections（驚喜連結）
+- Suggested Questions（推薦問題）
 
 ---
 
