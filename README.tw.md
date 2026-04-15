@@ -31,16 +31,10 @@ graphify 將書本內容切分為可處理的 chunk，然後使用 LLM 語意提
 
 **需求環境：** Python 3.10+ 以及 [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
-```bash
-pip install graphifyy
-```
-
-> 由於 `graphify` 名稱正在取回中，PyPI 套件暫時命名為 `graphifyy`。CLI 指令仍為 `graphify`。
-
-接著為 Gemini CLI 安裝 skill：
+安裝 skill 讓 Gemini CLI 能識別 `/graphify` 觸發指令（在 graphify 專案目錄下啟動 `.venv` 後執行）：
 
 ```bash
-graphify install --platform gemini
+python -m graphify install --platform gemini
 ```
 
 ## 完整用法

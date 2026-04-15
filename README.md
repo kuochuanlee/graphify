@@ -31,16 +31,10 @@ Every relationship is tagged `EXTRACTED` (found directly in source), `INFERRED` 
 
 **Requires:** Python 3.10+ and [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
-```bash
-pip install graphifyy
-```
-
-> The PyPI package is temporarily named `graphifyy` while the `graphify` name is being reclaimed. The CLI command is still `graphify`.
-
-Then install the skill for Gemini CLI:
+Install the skill so Gemini CLI recognizes the `/graphify` trigger (run from the graphify project directory with `.venv` activated):
 
 ```bash
-graphify install --platform gemini
+python -m graphify install --platform gemini
 ```
 
 ## Usage
