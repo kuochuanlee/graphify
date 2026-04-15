@@ -119,7 +119,7 @@ If `total_chunks` is 0, skip to Part C.
 For each chunk from 1 to `total_chunks`, construct the following PowerShell command (replace `i` with the chunk number). Run ALL chunks concurrently in the background.
 
 ```powershell
-Get-Content graphify-out\.graphify_prompt_i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\.graphify_chunk_i.json -Encoding utf8
+Get-Content graphify-out\prompts\i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\chunks\i.json -Encoding utf8
 ```
 
 Wait for all background executions to complete before proceeding.

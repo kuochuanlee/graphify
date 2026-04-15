@@ -101,7 +101,7 @@ class TestBookPipelineEndToEnd:
         assert len(chunk_files) >= 1, "應產生至少 1 個 chunk"
 
         # 驗證 prompt 檔案產生
-        prompt_files = sorted(out_dir.glob(".graphify_prompt_*.txt"))
+        prompt_files = sorted((out_dir / "prompts").glob("*.txt"))
         assert len(prompt_files) == len(chunk_files), \
             "prompt 檔案數量應等於 chunk 數量"
 
@@ -121,7 +121,7 @@ class TestBookPipelineEndToEnd:
         # -- Step 3: 模擬 LLM 語意提取（寫入假的 chunk 結果）--
         for i in range(1, len(chunk_files) + 1):
             fake_result = _make_fake_chunk_result(i)
-            (out_dir / f".graphify_chunk_{i}.json").write_text(
+            (out_dir / "chunks" / f"{i}.json").write_text(
                 json.dumps(fake_result, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
@@ -231,7 +231,7 @@ class TestBookPipelineEndToEnd:
         chunk_count = len(list((out_dir / "book_chunks").glob("*.md")))
         for i in range(1, chunk_count + 1):
             fake = _make_fake_chunk_result(i)
-            (out_dir / f".graphify_chunk_{i}.json").write_text(
+            (out_dir / "chunks" / f"{i}.json").write_text(
                 json.dumps(fake, ensure_ascii=False),
                 encoding="utf-8",
             )

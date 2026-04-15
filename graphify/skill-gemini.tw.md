@@ -119,7 +119,7 @@ python -m graphify pipeline prepare-semantic [--deep]
 針對 1 到 `total_chunks` 的每個 chunk，建構下方的 PowerShell 指令（將 `i` 替換為實際數字）。將所有 chunk 的指令丟到背景平行執行。
 
 ```powershell
-Get-Content graphify-out\.graphify_prompt_i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\.graphify_chunk_i.json -Encoding utf8
+Get-Content graphify-out\prompts\i.txt -Raw | gemini --yolo | Out-File -FilePath graphify-out\chunks\i.json -Encoding utf8
 ```
 
 等待所有的背景執行完畢後，再進入下個步驟。

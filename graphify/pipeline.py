@@ -339,6 +339,11 @@ def cmd_prepare_semantic(args: list[str]) -> None:
             "Mark uncertain ones AMBIGUOUS instead of omitting."
         )
 
+    prompt_dir = OUT_DIR / "prompts"
+    prompt_dir.mkdir(exist_ok=True)
+    chunk_dir = OUT_DIR / "chunks"
+    chunk_dir.mkdir(exist_ok=True)
+
     # 產生每個 chunk 的 prompt 檔案
     prompt_files = []
     for i, chunk in enumerate(chunks, 1):
@@ -348,7 +353,7 @@ def cmd_prepare_semantic(args: list[str]) -> None:
             TOTAL_CHUNKS=str(total),
             DEEP_MODE_SECTION=deep_section,
         )
-        p = OUT_DIR / f".graphify_prompt_{i}.txt"
+        p = prompt_dir / f"{i}.txt"
         p.write_text(prompt, encoding="utf-8")
         prompt_files.append(str(p))
 
@@ -371,7 +376,7 @@ def cmd_merge_semantic() -> None:
     from graphify.cache import save_semantic_cache
 
     # 收集所有 chunk 結果
-    chunk_files = sorted(glob.glob(str(OUT_DIR / ".graphify_chunk_*.json")))
+    chunk_files = sorted(glob.glob(str(OUT_DIR / "chunks" / "*.json")))
     all_nodes: list[dict] = []
     all_edges: list[dict] = []
     all_hyperedges: list[dict] = []
@@ -465,15 +470,31 @@ def cmd_merge_semantic() -> None:
         if p.exists():
             p.unlink()
 
-    _clean_stale_dispatch_files()
+    detect = _load_json(".graphify_detect.json")
+    if not detect.get("book_mode"):
+        _clean_stale_dispatch_files()
+    else:
+        # Book mode 不清理 prompts/ 和 chunks/，確保進度可續作且不依賴 hash
+        pass
 
 
 def _clean_stale_dispatch_files() -> None:
     """清除前次執行殘留的 chunk 和 prompt 暫存檔案。
 
     避免殘留檔案污染後續執行的 merge 結果。
-    由 prepare-semantic 和 merge-semantic 呼叫。
+    由 prepare-semantic 呼叫，以及非 book_mode 的 merge-semantic 呼叫。
     """
+    prompt_dir = OUT_DIR / "prompts"
+    if prompt_dir.exists():
+        for f in prompt_dir.glob("*.txt"):
+            f.unlink(missing_ok=True)
+            
+    chunk_dir = OUT_DIR / "chunks"
+    if chunk_dir.exists():
+        for f in chunk_dir.glob("*.json"):
+            f.unlink(missing_ok=True)
+
+    # 也清除舊版根目錄的檔案，防止舊資料殘留
     for pattern in [".graphify_chunk_*.json", ".graphify_prompt_*.txt"]:
         for f in OUT_DIR.glob(pattern):
             f.unlink(missing_ok=True)
@@ -497,7 +518,12 @@ def cmd_book_prepare() -> None:
     book_file = Path(detect["book_file"])
     chunk_dir = OUT_DIR / "book_chunks"
 
-    # 只清除 prompt 暫存檔（保留 chunk 結果以支援續作）
+    prompt_dir = OUT_DIR / "prompts"
+    prompt_dir.mkdir(exist_ok=True)
+    json_chunk_dir = OUT_DIR / "chunks"
+    json_chunk_dir.mkdir(exist_ok=True)
+
+    # 清除舊版根目錄殘留檔案
     for f in OUT_DIR.glob(".graphify_prompt_*.txt"):
         f.unlink(missing_ok=True)
 
@@ -515,25 +541,23 @@ def cmd_book_prepare() -> None:
     template_text = template_path.read_text(encoding="utf-8")
     tmpl = Template(template_text)
 
-    # 產生每個 chunk 的 prompt 檔案
-    prompt_files = []
-    for i, chunk_path in enumerate(chunks, 1):
-        prompt = tmpl.safe_substitute(
-            CHUNK_NUM=str(i),
-            TOTAL_CHUNKS=str(total),
-            SOURCE_CHUNK=chunk_path.name,
-            CHUNK_TEXT=chunk_path.read_text(encoding="utf-8"),
-            CURRENT_HEADINGS="",
-        )
-        p = OUT_DIR / f".graphify_prompt_{i}.txt"
-        p.write_text(prompt, encoding="utf-8")
-        prompt_files.append(str(p))
+    # 產生每個未完成 chunk 的 prompt 檔案（依賴後方的 completed 邏輯）
+    # 因為需要先偵測已完成的 chunk，所以我們將產生 prompt 的邏輯移到偵測之後。
 
     # 偵測已完成的 chunk（續作邏輯）
     completed = []
     remaining = []
     for i in range(1, total + 1):
-        chunk_result = OUT_DIR / f".graphify_chunk_{i}.json"
+        chunk_result = json_chunk_dir / f"{i}.json"
+        
+        # 兼容讀取舊版的 chunk 給過渡期使用者
+        legacy_chunk_result = OUT_DIR / f".graphify_chunk_{i}.json"
+        if legacy_chunk_result.exists() and not chunk_result.exists():
+            try:
+                shutil.copy(legacy_chunk_result, chunk_result)
+            except Exception:
+                pass
+                
         if chunk_result.exists():
             try:
                 data = json.loads(
@@ -545,6 +569,23 @@ def cmd_book_prepare() -> None:
             except (json.JSONDecodeError, OSError):
                 pass
         remaining.append(i)
+
+    # 產生未完成部分的 prompt 檔案
+    prompt_files = []
+    for i, chunk_path in enumerate(chunks, 1):
+        if i in completed:
+            continue
+            
+        prompt = tmpl.safe_substitute(
+            CHUNK_NUM=str(i),
+            TOTAL_CHUNKS=str(total),
+            SOURCE_CHUNK=chunk_path.name,
+            CHUNK_TEXT=chunk_path.read_text(encoding="utf-8"),
+            CURRENT_HEADINGS="",
+        )
+        p = prompt_dir / f"{i}.txt"
+        p.write_text(prompt, encoding="utf-8")
+        prompt_files.append(str(p))
 
     # Book mode 無 AST，建立空 stub
     _save_json(".graphify_ast.json", {
