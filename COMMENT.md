@@ -67,6 +67,8 @@ gemini mcp add graphify "D:\gemini-cli\目標專案\.venv\Scripts\python.exe" -m
 
 這指令其實就是 Gemini CLI 會幫忙到專案目錄下的.gemini\settings.json 寫入 mcp server 設定，你也可以手動編輯。
 
+2026/4/22目前的 Google Antigravity 完全不支援專案範圍（Project-scoped）的 MCP 設定檔。它強制所有使用者必須寫在同一個「全域（Global）」檔案裡。C:\Users\kuoch\.gemini\antigravity\mcp_config.json
+
 #### 卸載 MCP 伺服器
 
 ```powershell
